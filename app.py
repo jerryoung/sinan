@@ -18,7 +18,7 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-st.set_page_config(page_title="司南 · 量化仓位导航", page_icon="🧭", layout="wide")
+st.set_page_config(page_title="司南 · 量化平台", page_icon="🧭", layout="wide")
 
 from ui import (backtest, quotes, settings_page, shadow, strategy_config,  # noqa: E402
                 updater, warehouse)
@@ -49,13 +49,13 @@ if getattr(pg, "url_path", "").strip("/") in _QUANT_PAGES:
                   next((i for i, f in enumerate(cfgs)
                         if f.stem == "combo_turtle_xsmom_x2"), 0))
     h_left, h_right = st.columns([2.4, 1], vertical_alignment="bottom")
-    h_left.title("🧭 司南 · 量化仓位导航")
+    h_left.title("🧭 司南 · 量化平台")
     with h_right:
         sel_g = st.selectbox("当前策略(全局)", cfgs, index=default_ix,
                              format_func=cfg_label, key="global_cfg")
         st.session_state["_sel_path"] = sel_g
         st.caption(f"配置文件:{sel_g.name}")
 else:
-    st.title("🧭 司南 · 量化仓位导航")
+    st.title("🧭 司南 · 量化平台")
 
 pg.run()
