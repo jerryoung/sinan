@@ -172,12 +172,19 @@ def render_param_form(d: dict, prefix: str) -> dict:
     combo(多策略组合)以嵌套子表单渲染各腿。"""
     strat = d.get("strategy", "")
     out = copy.deepcopy(d)
-    c1, c2, c3 = st.columns([2, 1, 1])
+    c1, c2, c3, c4 = st.columns([2, 2, 1, 1])
     out["name"] = c1.text_input("name", d.get("name", ""), key=f"pf_{prefix}_name",
                                 help="配置名(报告与 targets 留痕用)")
-    c2.text_input("strategy", strat, disabled=True, key=f"pf_{prefix}_strat",
+    disp = c2.text_input("display_name(展示名)", d.get("display_name") or "",
+                         key=f"pf_{prefix}_disp",
+                         help="界面显示名称(纯展示,不参与留痕);留空则显示配置文件名")
+    if disp.strip():
+        out["display_name"] = disp.strip()
+    else:
+        out.pop("display_name", None)
+    c3.text_input("strategy", strat, disabled=True, key=f"pf_{prefix}_strat",
                   help="策略实现(注册名);换策略请改用高级模式")
-    out["lookback"] = int(c3.number_input("lookback", value=int(d.get("lookback", 750)),
+    out["lookback"] = int(c4.number_input("lookback", value=int(d.get("lookback", 750)),
                                           step=50, help=COMMON_HELP["lookback"],
                                           key=f"pf_{prefix}_lb"))
     cap_v = float(st.number_input(
@@ -375,6 +382,15 @@ def confirm_delete(target: Path, extras: list[Path] | None = None,
         st.rerun()
 
 
+def cfg_label(p: Path) -> str:
+    """策略在界面上的展示名:YAML 的 display_name,缺省回退配置文件名。"""
+    try:
+        d = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        return str(d.get("display_name") or p.stem)
+    except Exception:                              # noqa: BLE001 坏文件仍可选中
+        return p.stem
+
+
 # ────────────────────────── 页面 ──────────────────────────
 st.title("🧭 司南 · 量化仓位导航")
 cfgs = strategy_files()
@@ -383,14 +399,15 @@ default_ix = next((i for i, f in enumerate(cfgs)
 with st.sidebar:
     st.markdown("### 策略配置")
     sel_g = st.selectbox("当前策略(全局)", cfgs, index=default_ix,
-                         format_func=lambda p: p.stem, key="global_cfg")
+                         format_func=cfg_label, key="global_cfg")
     sel_name = yaml.safe_load(sel_g.read_text(encoding="utf-8")).get("name", sel_g.stem)
-    st.caption("此选择贯穿 影子模式 / 策略配置 / 回测 / 报告")
+    sel_label = cfg_label(sel_g)
+    st.caption(f"配置文件:{sel_g.name}\n\n此选择贯穿 影子模式 / 策略配置 / 回测 / 报告")
 tab_shadow, tab_cfg, tab_bt, tab_data = st.tabs(["影子模式", "策略配置", "回测", "数据"])
 
 with tab_shadow:
     st.subheader("影子模式:更新数据 → 质检 → 生成目标仓位")
-    st.caption(f"当前策略:**{sel_g.stem}**(在左侧边栏切换)")
+    st.caption(f"当前策略:**{sel_label}**(在左侧边栏切换)")
     if st.button("▶ 一键更新并生成 targets", type="primary"):
         with st.spinner("拉数 → 质检 → 出信号(约 1~2 分钟)…"):
             r = subprocess.run([sys.executable, str(ROOT / "scripts" / "shadow_update.py"),
@@ -404,9 +421,9 @@ with tab_shadow:
     st.divider()
     tfs = targets_files(sel_name)
     if tfs:
-        st.markdown(f"**最新目标仓位(策略:{sel_name})**")
+        st.markdown(f"**最新目标仓位(策略:{sel_label})**")
         show_targets(tfs[0])
-        with st.expander(f"历史 targets(策略:{sel_name})"):
+        with st.expander(f"历史 targets(策略:{sel_label})"):
             s1, s2 = st.columns([4, 1])
             tp = s1.selectbox("选择日期", tfs, format_func=lambda p: p.name)
             s2.markdown("<div style='height:1.8em'></div>", unsafe_allow_html=True)
@@ -415,7 +432,7 @@ with tab_shadow:
             if tp != tfs[0]:
                 show_targets(tp)
     else:
-        st.info(f"策略 {sel_name} 尚无 targets 文件,先点上面的按钮生成一份。")
+        st.info(f"策略 {sel_label} 尚无 targets 文件,先点上面的按钮生成一份。")
 
 with tab_cfg:
     st.subheader("策略配置")
@@ -471,7 +488,7 @@ with tab_cfg:
 
 with tab_bt:
     st.subheader("回测")
-    st.caption(f"当前策略:**{sel_g.stem}**(运行已保存的 YAML;编辑到『策略配置』页签,切换在左侧边栏)")
+    st.caption(f"当前策略:**{sel_label}**(运行已保存的 YAML;编辑到『策略配置』页签,切换在左侧边栏)")
     sel_run = sel_g
     c1, c2 = st.columns(2)
     start = c1.text_input("开始", "2015-01-05")
@@ -513,12 +530,12 @@ with tab_bt:
             st.success(f"回测完成,报告已存档:{out.name}(见下方)")
 
     st.divider()
-    st.subheader(f"回测报告(策略:{sel_name})")
+    st.subheader(f"回测报告(策略:{sel_label})")
     reports = sorted((p for p in Path(load_settings().reports_dir).glob("*.html")
                       if p.name.startswith(sel_name + "_")),
                      key=lambda p: p.stat().st_mtime, reverse=True)
     if not reports:
-        st.info(f"策略 {sel_name} 暂无回测报告,先在上方运行一次")
+        st.info(f"策略 {sel_label} 暂无回测报告,先在上方运行一次")
     else:
         st.caption("每次回测自动存档为一份报告;默认展示最新一份,可切换历史版本对比。")
         r1, r2 = st.columns([4, 1])

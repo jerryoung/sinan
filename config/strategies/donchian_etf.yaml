@@ -4,6 +4,7 @@
 # X = DD_tol/n = 35%/8;换算到组合权重即 cap = 1/7 ≈ 0.143、x_risk = X/7 ≈ 0.00625。
 # lookback 走 StrategyCfg 顶层字段;params 显式写全策略参数(便于留痕与调参对照)。
 name: donchian_etf
+display_name: 唐奇安55 · 七篮基准
 strategy: donchian
 sec_type: etf
 universe: ["510300", "510500", "159915", "512880", "518880", "513100", "511010"]

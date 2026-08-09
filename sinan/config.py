@@ -63,6 +63,9 @@ class StrategyCfg(BaseModel):
     """一份策略 = 一个 YAML(config/strategies/*.yaml)。"""
 
     name: str                       # 实例名,用于 targets 留痕
+    # 展示名(纯 UI 用途,不参与 targets/报告等任何留痕契约);
+    # None = 界面回退显示配置文件名
+    display_name: str | None = None
     strategy: str                   # 注册表里的策略函数名,如 "donchian"
     universe: list[str]             # 标的池(6 位代码)
     sec_type: str = "etf"           # universe 的品种类型

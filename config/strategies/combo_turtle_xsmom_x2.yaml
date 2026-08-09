@@ -1,4 +1,5 @@
 name: combo_turtle_xsmom_x2
+display_name: 组合:海龟×2 + 截面动量×2(跟踪中)
 strategy: combo
 sec_type: etf
 universe: ['510300', '159915', '512010', '510420', '159995', '512660', '512690', '513050',
