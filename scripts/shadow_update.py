@@ -34,6 +34,8 @@ def main() -> int:
     ap.add_argument("--exec-date", default=None,
                     help="targets 执行日;缺省=数据最新日的下一工作日")
     ap.add_argument("--skip-update", action="store_true", help="只出信号不更新数据")
+    ap.add_argument("--skip-signal", action="store_true",
+                    help="只更新数据不出信号(数据中心·数据更新页用)")
     args = ap.parse_args()
 
     import numpy as np
@@ -111,6 +113,9 @@ def main() -> int:
                 print("区间内无新数据(节假日/周末)")
 
     cutoff = store.read_bars(symbols=universe, sec_type=cfg.sec_type)["date"].max()
+    if args.skip_signal:
+        print(f"数据截止 {cutoff.date()},按 --skip-signal 跳过信号生成")
+        return 0
     if args.exec_date:
         exec_date = args.exec_date
     else:

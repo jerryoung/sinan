@@ -55,8 +55,10 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   `rebalance_band` 策略级覆盖全局(定投小增量需 0.005 < 默认 0.02)。
 - **特例语义**:dca 的 `params.start` 在回测中被引擎覆盖为窗口首日(配置值只锚定
   影子/实盘计划);xsmom 逐日定仓,是"入场时刻锁定权重"约定的唯一例外。
-- **app.py 只做编排与展示**,不含策略/引擎逻辑;回测页遵循"一次回测=一份报告"
-  (HTML 归档 + .cfg.yaml 快照 + .result.json 数据,统一由 show_report 渲染)。
+- **面板只做编排与展示**,不含策略/引擎逻辑:app.py 是 st.navigation 路由入口
+  (左侧分组:量化策略/数据中心),页面在 ui/ 包、共享层 ui/common.py;
+  回测页遵循"一次回测=一份报告"(HTML 归档 + .cfg.yaml 快照 + .result.json
+  数据,统一由 show_report 渲染)。
 
 ## 关键约定与已知的坑
 

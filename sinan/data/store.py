@@ -120,6 +120,22 @@ class DataStore:
                 out[c] = out[c] * f
         return out.reset_index(drop=True)
 
+    def coverage(self) -> pd.DataFrame:
+        """数据仓覆盖概况:各品种的标的数/行数/起止日期(duckdb 聚合,不加载明细)。"""
+        cols = ["sec_type", "n_symbols", "n_rows", "min_date", "max_date"]
+        glob = str(self.root / "bars_daily" / "**" / "*.parquet")
+        if not any((self.root / "bars_daily").rglob("*.parquet")):
+            return pd.DataFrame(columns=cols)
+        sql = (f"SELECT sec_type, COUNT(DISTINCT symbol) AS n_symbols, "
+               f"COUNT(*) AS n_rows, MIN(date) AS min_date, MAX(date) AS max_date "
+               f"FROM read_parquet('{glob}', hive_partitioning=1, union_by_name=1) "
+               f"GROUP BY sec_type ORDER BY sec_type")
+        with duckdb.connect() as con:
+            out = con.execute(sql).df()
+        for c in ("min_date", "max_date"):
+            out[c] = pd.to_datetime(out[c])
+        return out[cols]
+
     # ------------------------------------------------------------------
     # 小表通用 upsert / read
     # ------------------------------------------------------------------

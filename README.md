@@ -49,7 +49,7 @@ sinan/             Python 包(核心代码,与项目同名)
 config/            settings.yaml(本金/路径/执行/风控)· rules.yaml(品种规则)· strategies/*.yaml
 scripts/           bootstrap / daily_update / shadow_update / run_signal / run_backtest / 研究脚本
 qmt_shell/         ~100 行 QMT 薄壳模板(不含策略逻辑,绑定 STRATEGY_NAME)
-app.py             Streamlit 操作面板
+app.py + ui/       Streamlit 操作面板(app.py 路由入口,ui/ 页面模块)
 docs/RESEARCH.md   研究档案:全部实验结论表与决策记录
 var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fills)· reports
 ```
@@ -99,12 +99,16 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
   dca 的计划起始日在回测中以回测窗口起点为准(配置 `start` 只锚定影子/实盘)。
 - 成本:ETF 单边 5bp、个股 8bp;年化基准 244 交易日;蒙特卡洛固定 seed。
 
-## 操作面板(app.py)
+## 操作面板(app.py + ui/)
 
-四个页签,策略在左侧边栏全局选择:**影子模式**(一键拉数+质检+出 targets,
-历史可删)· **策略配置**(表单化,参数带 ❓ 说明、枚举下拉 / 高级 YAML 双模式)·
-**回测**(一次回测=一份存档报告:指标/净值/月度热力/分页流水,自动留配置快照
-并可与当前配置 diff)· **数据**(数据仓查询 + K 线)。
+`streamlit run app.py`。左侧分组导航(st.navigation 多页架构,页面相互隔离、
+按需执行),侧栏常驻"当前策略(全局)"选择器贯穿所有页面:
+
+- **量化策略**:影子模式(一键拉数+质检+出 targets,历史可删)· 回测
+  (一次回测=一份存档报告:指标/净值/月度热力/分页流水,配置快照可与当前
+  diff)· 策略配置(表单化带 ❓ 说明与枚举下拉 / 高级 YAML 双模式)
+- **数据中心**:行情查询(标的搜索 + K 线)· 数据仓概况(三品种覆盖/日历/
+  标的档案)· 数据更新(增量更新策略池、手动补数)
 
 ## 研究档案
 
