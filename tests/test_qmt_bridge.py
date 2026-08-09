@@ -90,3 +90,27 @@ def test_token_rejected():
         bad.call("anything")
     bad.close()
     srv.close()
+
+
+def test_readonly_channel_blocks_trade_allows_query():
+    """ALLOW_TRADE=False:交易函数拒绝、查询照常——远端只读的最小权限。"""
+    ns = {"passorder": _fake_passorder,
+          "get_trade_detail_data": _fake_get_trade_detail_data}
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    srv = rpc_server.serve(ns, _FakeC(), port=port, token="t", allow_trade=False)
+    cli = qmt_sdk._Client()
+    cli.connect("127.0.0.1", port, token="t")
+    assert cli.call("get_trade_detail_data", "a", "STOCK",
+                    "account")[0].m_dBalance == 100000.0
+    with pytest.raises(qmt_sdk.QmtRpcError, match="只读通道"):
+        cli.call("passorder", 23, 1101, "a", "x", 5, -1, 100, "", 2, "", "__C__")
+    cli.close()
+    srv.close()
+
+
+def test_remote_bind_requires_token():
+    """非 127.0.0.1 绑定必须配 token,否则拒绝启动(防裸奔公网)。"""
+    with pytest.raises(ValueError, match="TOKEN"):
+        rpc_server.serve({}, _FakeC(), host="0.0.0.0", port=0, token="")

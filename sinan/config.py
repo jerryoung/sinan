@@ -48,6 +48,9 @@ class Settings(BaseModel):
     fills_dir: Path = Path("var/runtime/fills")
     reports_dir: Path = Path("var/reports")
     wecom_webhook: str = ""
+    # 远端 QMT rpc_server 连接参数(host/port/timeout,非机密);
+    # token 存 ~/.qmt_rpc_token(机密,严禁入库),qmt_sdk.connect_from_settings 读取
+    qmt_rpc: dict = Field(default_factory=dict)
     execution: ExecutionCfg = Field(default_factory=ExecutionCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)
 

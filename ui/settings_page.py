@@ -81,6 +81,22 @@ def page():
             step=1.0, format="%.0f", key=f"set_{fkey}_age"))
         out["risk"] = rk
 
+        st.markdown("**QMT 远端接口(qmt_rpc)**")
+        qr = dict(d.get("qmt_rpc") or {})
+        q1, q2, q3 = st.columns(3)
+        qr["host"] = q1.text_input(
+            "host", qr.get("host", "127.0.0.1"), key=f"set_{fkey}_qh",
+            help="SSH 隧道场景保持 127.0.0.1;Tailscale 场景填 ECS 的 100.x IP")
+        qr["port"] = int(q2.number_input(
+            "port", value=int(qr.get("port", 58620)), step=1, key=f"set_{fkey}_qp"))
+        qr["timeout"] = float(q3.number_input(
+            "timeout(秒)", value=float(qr.get("timeout", 15.0)), step=5.0,
+            key=f"set_{fkey}_qt"))
+        out["qmt_rpc"] = qr
+        st.caption("⚠️ token 不在此配置:写入本机 `~/.qmt_rpc_token`(单行,建议 "
+                   "`chmod 600`),严禁进仓库/配置/日志。远程访问务必走 SSH 隧道"
+                   "或 Tailscale,token 只是第二道锁——见 docs/qmt-deploy.md。")
+
         text = yaml.safe_dump(out, allow_unicode=True, sort_keys=False,
                               default_flow_style=False)
         with st.expander("生成的 YAML 预览"):
