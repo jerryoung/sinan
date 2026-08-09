@@ -86,12 +86,18 @@ class _Client:
                    "args": ["__C__" if isinstance(a, _CProxy) else a
                             for a in args],
                    "kwargs": kwargs}
-            self._sock.sendall((json.dumps(req, ensure_ascii=False) + "\n")
-                               .encode("utf-8"))
-            line = self._rf.readline()
+            try:
+                self._sock.sendall((json.dumps(req, ensure_ascii=False) + "\n")
+                                   .encode("utf-8"))
+                line = self._rf.readline()
+            except OSError as e:               # 对端拒绝/重置(如 IP 白名单)
+                self.close()
+                raise QmtRpcError(f"连接已断开:{e}(QMT 侧服务是否在运行?"
+                                  "是否在其 IP 白名单内?)") from e
         if not line:
             self.close()
-            raise QmtRpcError("连接已断开(QMT 侧服务是否在运行?)")
+            raise QmtRpcError("连接已断开(QMT 侧服务是否在运行?"
+                              "是否在其 IP 白名单内?)")
         resp = json.loads(line.decode("utf-8"))
         if not resp.get("ok"):
             raise QmtRpcError(resp.get("error", "未知错误"))
