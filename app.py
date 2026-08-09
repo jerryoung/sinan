@@ -486,19 +486,31 @@ with tab_bt:
     if st.button("▶ 运行回测", type="primary"):
         from sinan.backtest.engine import run_backtest
         from sinan.backtest.report import compute_stats, render_html
+        from sinan.data.ensure import ensure_bars
         cfg = load_strategy(sel_run)
         cfg_snap = sel_run.read_text(encoding="utf-8")   # 回测时的配置快照
         settings_ = load_settings()
-        with st.spinner("逐日回测运行中(池越大越慢,约 1~5 分钟)…"):
-            res = run_backtest(get_store(), cfg, settings_, start=start, end=end,
-                               initial_capital=cfg.capital or settings_.capital)
-            stats = compute_stats(res)
-            out = settings_.reports_dir / f"{cfg.name}_{start}_{end}.html"
-            render_html(res, stats, out)                       # 归档/导出件
-            out.with_suffix(".cfg.yaml").write_text(cfg_snap, encoding="utf-8")
-            save_result_json(res, stats, result_sidecar(out))  # 页面渲染数据源
-        st.session_state.pop(report_sel_key, None)  # 让下方自动选中刚生成的报告
-        st.success(f"回测完成,报告已存档:{out.name}(见下方)")
+        # 缺行情的标的先自动补数(新浪源全量),拉不到才报错终止
+        fetch_logs: list[str] = []
+        with st.spinner("检查行情覆盖,缺失标的自动补数…"):
+            still_missing = ensure_bars(get_store(), cfg.universe, cfg.sec_type,
+                                        log=fetch_logs.append)
+        for m in fetch_logs:
+            st.info(m)
+        if still_missing:
+            st.error(f"以下标的无法获取行情,回测未运行:{'、'.join(still_missing)}"
+                     "——请检查代码是否正确,或先经 bootstrap/影子更新入库。")
+        else:
+            with st.spinner("逐日回测运行中(池越大越慢,约 1~5 分钟)…"):
+                res = run_backtest(get_store(), cfg, settings_, start=start, end=end,
+                                   initial_capital=cfg.capital or settings_.capital)
+                stats = compute_stats(res)
+                out = settings_.reports_dir / f"{cfg.name}_{start}_{end}.html"
+                render_html(res, stats, out)                       # 归档/导出件
+                out.with_suffix(".cfg.yaml").write_text(cfg_snap, encoding="utf-8")
+                save_result_json(res, stats, result_sidecar(out))  # 页面渲染数据源
+            st.session_state.pop(report_sel_key, None)  # 让下方自动选中新报告
+            st.success(f"回测完成,报告已存档:{out.name}(见下方)")
 
     st.divider()
     st.subheader(f"回测报告(策略:{sel_name})")

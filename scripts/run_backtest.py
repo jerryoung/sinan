@@ -34,6 +34,13 @@ def main() -> int:
     cfg = load_strategy(args.strategy)
     store = DataStore(settings.store_root)
 
+    # 缺行情的标的先自动补数(新浪源全量),拉不到才终止
+    from sinan.data.ensure import ensure_bars
+    still = ensure_bars(store, cfg.universe, cfg.sec_type)
+    if still:
+        print(f"以下标的无法获取行情,回测终止:{still}")
+        return 1
+
     result = run_backtest(store, cfg, settings, args.start, args.end,
                           initial_capital=cfg.capital or settings.capital)
     stats = compute_stats(result)

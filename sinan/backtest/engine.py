@@ -121,7 +121,10 @@ def run_backtest(
     # ---- 行情:一次读全历史(信号回放需要 start 之前的 lookback 数据) ----
     bars = store.read_bars(symbols=universe, adjust=True)
     if len(bars) == 0:
-        raise ValueError("回测标的在 store 中无行情数据")
+        raise ValueError(
+            f"回测标的在 store 中无行情数据(universe {len(universe)} 只:"
+            f"{universe}); 引擎不触网,请先经 sinan.data.ensure.ensure_bars "
+            "补数(app 回测页与 run_backtest CLI 已自动调用)")
     mkt: dict[str, pd.DataFrame] = {
         str(sym): prepare_market(g, rules[str(sym)])
         for sym, g in bars.groupby("symbol") if str(sym) in rules
