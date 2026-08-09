@@ -29,16 +29,36 @@
 
 ### 方案 A:SSH 隧道(推荐,零暴露)
 
-ECS 上启用 OpenSSH Server(Windows 设置 → 可选功能 → OpenSSH 服务器,
-或 `Add-WindowsCapability -Online -Name OpenSSH.Server`),安全组只开 22 端口
-(并建议限源 IP)。`sinan_qmt.py` 保持 `RPC_HOST = "127.0.0.1"` 不变。本地:
+**ECS 侧(管理员 PowerShell)**:
 
-```bash
-ssh -N -L 58620:127.0.0.1:58620 user@<ECS公网IP>
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
 ```
 
-之后本地一切照常(`qmt.connect("127.0.0.1", 58620, token=...)`)——
-流量全程加密,QMT 端口对公网零暴露。配合 `autossh` 可保持长连。
+云控制台安全组:只放行 22 端口,授权对象填你本机公网 IP(如 `x.x.x.x/32`,
+IP 会变就按段放行)——网络层物理隔离的第一道。`sinan_qmt.py` 保持
+`RPC_HOST = "127.0.0.1"` 不变(RPC 端口对公网零暴露)。
+
+**本机侧**:`~/.ssh/config` 加一段,免记参数:
+
+```
+Host qmt-ecs
+    HostName <ECS公网IP>
+    User Administrator          # Windows 登录用户
+    LocalForward 58620 127.0.0.1:58620
+    ServerAliveInterval 30
+```
+
+开隧道(挂后台保活可用 autossh,`brew install autossh`):
+
+```bash
+ssh -N qmt-ecs
+# 或:autossh -M 0 -f -N qmt-ecs
+```
+
+之后本地一切照常(host 就是 127.0.0.1:58620)——流量全程加密。
 
 ### 方案 B:Tailscale(推荐,免隧道运维)
 
