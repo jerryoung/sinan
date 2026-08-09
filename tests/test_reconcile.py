@@ -94,7 +94,8 @@ def test_qmt_shell_order_target_no_direct_order(tmp_path):
     "scripts/daily_update.py",
     "scripts/run_signal.py",
     "scripts/run_backtest.py",
-    "qmt_shell/shell_strategy.py",
+    "qmt_shell/sinan_qmt.py",
+    "scripts/nightly_update.py",
 ])
 def test_scripts_syntax(rel):
     src = (ROOT / rel).read_text(encoding="utf-8")

@@ -1,4 +1,4 @@
-"""QMT socket 桥接端到端:rpc_server 分发/序列化 + qmt_sdk 同名调用还原。
+"""QMT socket 桥接端到端:sinan_qmt(统一脚本)分发/序列化 + qmt_sdk 同名还原。
 
 用伪 QMT 命名空间(passorder/get_trade_detail_data/COS 对象)与伪
 ContextInfo 在本地起真实 socket 服务,SDK 走完整协议往返。
@@ -7,7 +7,7 @@ import socket
 
 import pytest
 
-from qmt_shell import qmt_sdk, rpc_server
+from qmt_shell import qmt_sdk, sinan_qmt as rpc_server
 
 
 class _COS:                                     # 模拟 QMT 账户对象(m_* 属性)
@@ -137,3 +137,37 @@ def test_ip_allowlist_cidr_and_rejection():
         cli.call("anything")
     cli.close()
     srv.close()
+
+
+# ---------------- 多策略共账号:备注归因 + 虚拟账本 ----------------
+def test_remark_roundtrip():
+    r = rpc_server.make_remark("combo_x2", "20260810", 3)
+    assert r == "combo_x2#20260810#3"
+    strategy, ext = rpc_server.parse_remark(r)
+    assert strategy == "combo_x2" and ext == ["20260810", "3"]
+    assert rpc_server.parse_remark("手工下单") == (None, [])
+    assert rpc_server.parse_remark("") == (None, [])
+
+
+def test_plan_orders_diff_and_sell_first():
+    """差额按策略自身账本计算;卖单在前释放现金;手数向下取整。"""
+    ledger = {"cash": 50000.0, "pos": {"510300": 10000, "159941": 0}}
+    prices = {"510300": 5.0, "159941": 2.0, "518880": 8.0}
+    # total = 50000 + 10000×5 = 100000;目标:300 减到 30%、新开 518880 40%
+    orders = rpc_server.plan_orders(
+        {"510300": 0.3, "518880": 0.4}, ledger, prices, lot=100)
+    assert orders[0] == ("510300", "sell", 4000, 5.0)     # 卖单在前
+    assert ("518880", "buy", 5000, 8.0) in orders         # 40000/8=5000 股
+    # 未持有且目标为 0 的标的不产生委托
+    assert all(o[0] != "159941" for o in orders)
+
+
+def test_ledger_seed_and_persist(tmp_path, monkeypatch):
+    monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
+    led = rpc_server.load_ledger("s1", 100000.0)
+    assert led == {"cash": 100000.0, "pos": {}}            # 首次以 capital 开账
+    led["pos"]["510300"] = 2000
+    led["cash"] -= 2000 * 5.0
+    rpc_server.save_ledger("s1", led)
+    led2 = rpc_server.load_ledger("s1", 999.0)             # 已有账本忽略 capital
+    assert led2["cash"] == 90000.0 and led2["pos"]["510300"] == 2000

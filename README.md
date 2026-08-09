@@ -48,11 +48,10 @@ sinan/             Python 包(核心代码,与项目同名)
   └ live/          targets(风控裁剪/留痕/校验)· broker · reconcile · notify
 config/            settings.yaml(本金/路径/执行/风控)· rules.yaml(品种规则)· strategies/*.yaml
 scripts/           bootstrap / daily_update / shadow_update / run_signal / run_backtest / 研究脚本
-qmt_shell/         QMT 桥接三件套:shell_strategy(targets 薄壳,每日批处理执行;
-                   模拟/实盘由 QMT 侧绑定账号决定、壳上报 trade_mode,下单算法/账号
-                   经 targets 的 qmt 字段按策略配置)· rpc_server(QMT 侧 API socket
-                   转发)· qmt_sdk(本地 SDK,与内置 API 同名同形:passorder/
-                   get_trade_detail_data/C.get_full_tick…,任意 API 经通用转发覆盖)
+qmt_shell/         sinan_qmt(ECS 统一脚本,唯一必填 SHARE_DIR:执行全部策略 targets
+                   + 备注「策略ID#日期#序号」归因 + 策略虚拟账本 + fills 回写 + RPC
+                   转发;账号/模拟实盘从 QMT 绑定关系直读)· qmt_sdk(本地 SDK,
+                   与内置 API 同名同形,任意 API 经通用转发覆盖)
 app.py + ui/       Streamlit 操作面板(app.py 路由入口,ui/ 页面模块)
 docs/RESEARCH.md   研究档案:全部实验结论表与决策记录
 var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fills)· reports
