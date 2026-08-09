@@ -76,6 +76,12 @@ class StrategyCfg(BaseModel):
     # 再平衡带宽覆盖:None = 用全局 execution.rebalance_band。
     # 定投类策略单期增量小(如 1.3%),须低于默认 2% 带宽才能成交
     rebalance_band: float | None = None
+    # QMT 执行配置(可选):原样嵌入 targets payload 的 "qmt" 字段供薄壳读取,
+    # sinan 不解释其内容——每个策略可绑定不同账号与下单算法。约定键:
+    #   account: 资金账号(留空用薄壳常量)
+    #   algo: {quote_mode: latest|limit, price_offset: 0.002,
+    #          max_order_qty: 10000}  # 报价方式/限价偏移/单笔拆单上限
+    qmt: dict | None = None
     params: dict = Field(default_factory=dict)
 
 

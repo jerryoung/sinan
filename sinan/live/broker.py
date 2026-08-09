@@ -135,22 +135,27 @@ class QmtShellBroker:
             msg="不直接下单: 目标经 targets 文件桥接,由 QMT 薄壳 14:45 执行")
 
     # ---- fills 解析 ---------------------------------------------------
+    # 命名与 targets 对称:fills_{策略名}_{YYYYMMDD}.json(多策略互不覆盖);
+    # strategy=None 兼容旧的全局命名 fills_YYYYMMDD.json
     @staticmethod
-    def read_fills(fills_dir: str | Path, date) -> dict:
-        """解析薄壳回写的 fills_YYYYMMDD.json;文件缺失抛 FileNotFoundError。"""
+    def read_fills(fills_dir: str | Path, date, strategy: str | None = None) -> dict:
+        """解析薄壳回写的当日 fills;文件缺失抛 FileNotFoundError。"""
         ymd = pd.Timestamp(date).strftime("%Y%m%d")
-        fp = Path(fills_dir) / f"fills_{ymd}.json"
+        name = f"fills_{strategy}_{ymd}.json" if strategy else f"fills_{ymd}.json"
+        fp = Path(fills_dir) / name
         if not fp.exists():
             raise FileNotFoundError(f"fills 文件不存在: {fp}")
         return json.loads(fp.read_text(encoding="utf-8"))
 
     @staticmethod
-    def latest_fills(fills_dir: str | Path) -> dict | None:
+    def latest_fills(fills_dir: str | Path,
+                     strategy: str | None = None) -> dict | None:
         """最近一份 fills(文件名按日期排序);目录不存在或为空返回 None。"""
         d = Path(fills_dir)
         if not d.exists():
             return None
-        files = sorted(d.glob("fills_*.json"))
+        pattern = f"fills_{strategy}_*.json" if strategy else "fills_*.json"
+        files = sorted(d.glob(pattern))
         if not files:
             return None
         return json.loads(files[-1].read_text(encoding="utf-8"))

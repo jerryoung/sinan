@@ -48,7 +48,8 @@ sinan/             Python 包(核心代码,与项目同名)
   └ live/          targets(风控裁剪/留痕/校验)· broker · reconcile · notify
 config/            settings.yaml(本金/路径/执行/风控)· rules.yaml(品种规则)· strategies/*.yaml
 scripts/           bootstrap / daily_update / shadow_update / run_signal / run_backtest / 研究脚本
-qmt_shell/         ~100 行 QMT 薄壳模板(不含策略逻辑,绑定 STRATEGY_NAME)
+qmt_shell/         QMT 薄壳模板 v2(不含策略逻辑;模拟/实盘由 QMT 侧绑定账号决定,
+                   壳上报 trade_mode;下单算法/账号经 targets 的 qmt 字段按策略配置)
 app.py + ui/       Streamlit 操作面板(app.py 路由入口,ui/ 页面模块)
 docs/RESEARCH.md   研究档案:全部实验结论表与决策记录
 var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fills)· reports
@@ -102,13 +103,14 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 ## 操作面板(app.py + ui/)
 
 `streamlit run app.py`。左侧分组导航(st.navigation 多页架构,页面相互隔离、
-按需执行),侧栏常驻"当前策略(全局)"选择器贯穿所有页面:
+按需执行),右上角常驻"当前策略(全局)"选择器贯穿所有页面:
 
-- **量化策略**:影子模式(一键拉数+质检+出 targets,历史可删)· 回测
-  (一次回测=一份存档报告:指标/净值/月度热力/分页流水,配置快照可与当前
-  diff)· 策略配置(表单化带 ❓ 说明与枚举下拉 / 高级 YAML 双模式)
+- **量化策略**:策略看板(影子/实盘统一入口:收益统计、净值曲线、持仓详情、
+  交易记录,targets 详情可展开;有 QMT fills 即实盘口径,否则影子重放)·
+  回测(一次回测=一份存档报告,配置快照可 diff)· 策略配置(表单/YAML 双模式)
 - **数据中心**:行情查询(标的搜索 + K 线)· 数据仓概况(三品种覆盖/日历/
   标的档案)· 数据更新(增量更新策略池、手动补数)
+- **系统**:设置(全局 settings.yaml 界面化编辑)
 
 ## 研究档案
 

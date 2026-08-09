@@ -80,7 +80,7 @@ def main() -> int:
     # 本金优先级:CLI --total-asset > 策略 YAML capital > 全局 settings.capital
     positions = {}
     total_asset = args.total_asset or cfg.capital or settings.capital
-    last = QmtShellBroker.latest_fills(settings.fills_dir)
+    last = QmtShellBroker.latest_fills(settings.fills_dir, cfg.name)
     if last:
         positions = {s: float(w) for s, w in (last.get("weights") or {}).items()}
         total_asset = float(last.get("total_asset") or total_asset)
@@ -113,6 +113,8 @@ def main() -> int:
     prices = {s: float(df["close_raw"].iloc[-1]) if "close_raw" in df
               else float(df["close"].iloc[-1]) for s, df in data.items()}
     payload["capital"] = total_asset
+    if cfg.qmt:
+        payload["qmt"] = cfg.qmt          # 账号/下单算法原样透传给 QMT 薄壳
     payload["ref_orders"] = build_ref_orders(
         weights, current_weights=positions, capital=total_asset, prices=prices,
         lot_sizes={s: r.lot_size for s, r in rules.items()},

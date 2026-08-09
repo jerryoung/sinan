@@ -46,9 +46,13 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   q_eff,成交按原始价整手,估值按后复权收盘,分红=红利再投;先卖后买、现金不透支、
   涨跌停/停牌/强赎全模拟。改口径必须重新生成 `tests/fixtures/snapshot_nav.csv`
   并说明原因。
-- **targets 契约**:`targets_{策略名}_{YYYYMMDD}.json`,`date`=执行日、
-  `data_cutoff`=T−1;checksum 只覆盖权重,`ref_orders` 仅供参考;qmt_shell 的
-  checksum 算法与 `sinan/live/targets.py` 两侧各持一份拷贝,必须逐字节一致。
+- **targets/fills 契约**:`targets_{策略名}_{YYYYMMDD}.json`(`date`=执行日、
+  `data_cutoff`=T−1;checksum 只覆盖权重;`qmt` 字段原样透传策略级账号/下单算法;
+  `ref_orders` 仅供参考);薄壳回写 `fills_{策略名}_{YYYYMMDD}.json`(含
+  trade_mode=sim/real 由 QMT 侧上报、total_asset、positions、fills)——
+  看板与 run_signal 的持仓真相来源。qmt_shell 的 checksum 算法与
+  `sinan/live/targets.py` 两侧各持一份拷贝,必须逐字节一致。策略净值统一由
+  `sinan/live/ledger.py` 派生(有 fills 用账户真值,否则 targets 影子重放)。
 - **风险层级**:策略参数 cap/x_risk → 引擎 Σ≤1 + `max_positions`(与 live 共用
   `limit_positions`:已持仓优先)→ live `apply_risk` 多重裁剪 → 单标的 34% 兜底。
 - **配置解析优先级**:capital 为 CLI `--total-asset` > 策略 YAML > settings.capital;
