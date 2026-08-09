@@ -142,7 +142,7 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 
 | 公众号「可转债量化实盘」 | 个人微信(JerryWu) |
 |:---:|:---:|
-| <img src="docs/img/wechat_mp.png" width="220" alt="公众号二维码"> | <img src="docs/img/wechat_me.png" width="220" alt="个人微信二维码"> |
+| <img src="docs/img/wechat_mp.jpeg" width="220" alt="公众号二维码"> | <img src="docs/img/wechat_me.jpeg" width="220" alt="个人微信二维码"> |
 | 可转债/ETF 量化实盘记录、策略研究与复盘 | 备注「司南」,拉你进量化交流群 |
 
 **可提供的服务**(欢迎微信勾兑):
