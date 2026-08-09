@@ -1,0 +1,37 @@
+# 品种交易规则参数表(方案 §6)
+# 交易所改规则时改这里,代码不硬编码任何数值。
+# 费率口径:commission 为单边佣金率;stamp_tax_sell 仅股票卖出;slippage 为单边滑点率(计入执行价)。
+
+stock:
+  t_plus: 1
+  lot_size: 100
+  commission: 0.0003
+  stamp_tax_sell: 0.0005
+  slippage: 0.0005
+  limit_pct_default: 0.10     # 主板
+  limit_pct_star: 0.20        # 科创板 688/689、创业板 300/301
+  limit_pct_st: 0.05          # 主板 ST(双创 ST 仍 20%)
+  limit_pct_bj: 0.30          # 北交所(方案暂不纳入,规则表先留一行)
+
+etf:
+  t_plus: 1
+  lot_size: 100
+  commission: 0.0003
+  stamp_tax_sell: 0.0
+  slippage: 0.0002            # 合计单边 5bp,与仓库既有 ETF 成本口径一致
+  limit_pct_default: 0.10
+  limit_pct_star: 0.20
+  # T+0 类 ETF(跨境/债券/货币/黄金)按代码前缀近似识别,可用 t0_symbols 精确覆盖
+  t0_prefixes: ["511", "513", "518"]
+  t0_symbols: []
+  # ±20% 类 ETF(双创宽基)按前缀近似;个别标的可加入 limit20_symbols
+  limit20_prefixes: ["588", "589"]
+  limit20_symbols: []
+
+cb:
+  t_plus: 0                   # 可转债 T+0
+  lot_size: 10                # 10 张 = 1 手,沪深一致
+  commission: 0.0001
+  stamp_tax_sell: 0.0
+  slippage: 0.0010            # 转债流动性差,给更大滑点
+  limit_pct_default: 0.20

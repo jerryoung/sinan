@@ -1,3 +1,24 @@
+# ══════════════ 司南 项目专属规则(优先阅读)══════════════
+# ── 本地数据与运行时状态(体积大 / 含个人持仓信息,永不入库)──
+# store:   parquet + DuckDB 数据仓(~350MB,由 bootstrap/daily_update 重建)
+# runtime: targets 目标仓位 + QMT fills 成交回报(个人持仓痕迹)
+# reports: 回测报告三件套(.html/.cfg.yaml/.result.json,可重新生成)
+store/
+runtime/
+reports/
+logs/
+
+# ── 凭证(冗余防线:凭证本应放在 ~ 下,任何情况都不该出现在仓库内)──
+*.token
+*_token
+*.secret
+
+# ── 系统与编辑器 ──
+.DS_Store
+.vscode/
+.idea/
+
+# ══════════════ 以下为 GitHub Python 通用模板 ══════════════
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

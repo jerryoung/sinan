@@ -1,0 +1,17 @@
+# 海龟系统 1(快系统)ETF 实例 —— 与 donchian_etf(S2 变体)同篮子、同定仓口径,
+# 用于原始海龟"快慢双系统"的对照与 50/50 组合实验。
+# 定仓:等分策略槽的组合级等价参数,cap=1/7、x_risk=(0.35/8)/7(与 donchian_etf 一致)。
+name: turtle_s1_etf
+strategy: turtle_s1
+sec_type: etf
+universe: ["510300", "510500", "159915", "512880", "518880", "513100", "511010"]
+lookback: 750          # 信号重放窗口(根)
+params:
+  n_entry: 20          # S1 突破入场窗口(日)
+  n_exit: 10           # 反向突破出场窗口(日)
+  n_failsafe: 55       # 兜底入场窗口(日,无视过滤器)
+  atr_n: 20            # N = ATR 窗口(日)
+  stop_n_mult: 2.0     # 硬止损距离 = 2N(海龟原始)
+  x_risk: 0.00625      # 组合级每笔风险 = (DD_tol/n)/M = (0.35/8)/7
+  cap: 0.143           # 单标的权重上限 = 1/M = 1/7
+  use_filter: true     # 上次突破盈利则跳过(S1 过滤器);false = 纯 20/10 对照

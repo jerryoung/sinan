@@ -1,0 +1,18 @@
+# 唐奇安 ETF 趋势策略实例 —— 七只跨资产 ETF 篮子,与老脚本 etf_trend_backtest.py 对齐:
+#   权益:沪深300 / 中证500 / 创业板 / 证券行业;另类:黄金 / 纳指100 / 国债。
+# 定仓采用"等分策略槽"的组合级等价参数:老脚本每标的占 1/7 槽、槽内 w=min(1, X/stop),
+# X = DD_tol/n = 35%/8;换算到组合权重即 cap = 1/7 ≈ 0.143、x_risk = X/7 ≈ 0.00625。
+# lookback 走 StrategyCfg 顶层字段;params 显式写全策略参数(便于留痕与调参对照)。
+name: donchian_etf
+strategy: donchian
+sec_type: etf
+universe: ["510300", "510500", "159915", "512880", "518880", "513100", "511010"]
+lookback: 750          # 信号重放窗口(根),须覆盖最长持仓周期
+params:
+  n_entry: 55          # 突破入场窗口(日)
+  n_exit: 20           # Donchian 出场窗口(日,exit_mode=donchian 时生效)
+  atr_n: 20            # ATR 窗口(日)
+  atr_m: 3.0           # 吊灯止损倍数
+  x_risk: 0.00625      # 组合级每笔风险 = (DD_tol/n)/M = (0.35/8)/7
+  cap: 0.143           # 单标的权重上限 = 1/M = 1/7(等分策略槽口径)
+  exit_mode: atr       # 出场方式:atr(吊灯止损)| donchian

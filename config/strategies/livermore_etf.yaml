@@ -1,0 +1,16 @@
+# 利维摩尔 ETF 策略实例 —— 与 donchian_etf 同篮子、同定仓口径,便于直接对比。
+# 思路:市场要诀六状态状态机(θ=5×ATR,仓库量纲实验结论)+ 关键点确认入场
+# + 试探—加码(3 批,每上行 1×入场ATR 加一批,永不摊低)+ 危险信号/认错止损。
+name: livermore_etf
+strategy: livermore
+sec_type: etf
+universe: ["510300", "510500", "159915", "512880", "518880", "513100", "511010"]
+lookback: 750          # 信号重放窗口(根),须覆盖最长持仓周期
+params:
+  k_theta: 5.0         # 换栏阈值 θ = k_theta × ATR(市场要诀规则 4/6)
+  atr_n: 20            # ATR 窗口(日)
+  n_tranches: 3        # 分批建仓批数(试探 1/3 → 加码至满)
+  add_atr: 1.0         # 每上行 add_atr × 入场ATR 加一批
+  stop_atr: 3.0        # 试探仓认错止损距离(×入场ATR;亦为模块 2 定仓的 stop_frac)
+  x_risk: 0.00625      # 组合级每笔风险 = (DD_tol/n)/M = (0.35/8)/7(与 donchian_etf 同)
+  cap: 0.143           # 单标的权重上限 = 1/M = 1/7(等分策略槽口径)

@@ -1,0 +1,21 @@
+# 全局配置。相对路径基于项目根(trend/)。
+capital: 1000000              # 名义本金:影子模式参考委托单与回测默认初始资金;
+                              # 实盘接入后以 QMT fills 回报的 total_asset 为准
+store_root: store             # parquet + DuckDB 数据仓
+targets_dir: runtime/targets  # targets_YYYYMMDD.json 输出目录(与 QMT 薄壳共享)
+fills_dir: runtime/fills      # QMT 薄壳回写的成交回报
+reports_dir: reports          # 回测 HTML 报告
+
+wecom_webhook: ""             # 企业微信群机器人 webhook,空则只写本地日志
+
+execution:
+  price_mode: close           # 回测执行价:close(与实盘 14:45 执行近似对齐)| open
+  rebalance_band: 0.02        # |目标−当前| 权重差小于此值不调仓,抑制漂移磨损
+
+risk:                         # 执行层强制风控(不信任信号层)
+  max_weight_per_symbol: 0.34 # 单标的权重上限
+  max_total_weight: 1.0       # 总仓位上限
+  max_daily_turnover: 1.0     # 单日最大调仓额(占总资产比)
+  liquidity_pct_adv20: 0.05   # 单笔委托 ≤ 近20日均成交额的 5%
+  targets_max_age_hours: 8    # targets 文件时效
+  max_positions: 12           # 同时持仓数上限(0=不限);回测引擎与实盘同一语义

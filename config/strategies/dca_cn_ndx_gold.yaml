@@ -1,0 +1,9 @@
+name: dca_cn_ndx_gold
+strategy: dca
+sec_type: etf
+universe: ['510300', '159941', '518880']
+lookback: 750
+capital: 100000.0
+rebalance_band: 0.005
+params: {start: '2026-08-07', freq: M, amount: 4000, capital: 100000, dip_rule: dip2x,
+  ma_n: 250}

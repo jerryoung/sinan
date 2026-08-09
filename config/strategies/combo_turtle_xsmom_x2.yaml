@@ -1,0 +1,19 @@
+name: combo_turtle_xsmom_x2
+strategy: combo
+sec_type: etf
+universe: ['510300', '159915', '512010', '510420', '159995', '512660', '512690', '513050',
+  '512400', '515220', '510900', '513500', '159941', '513030', '518880', '159980',
+  '159985', '511010', '515100', '159962', '159518', '511090', '513130', '513520',
+  '159611', '513120']
+lookback: 758
+params:
+  legs:
+  - strategy: turtle_s1
+    weight: 0.5
+    params: {n_entry: 20, n_exit: 10, n_failsafe: 55, atr_n: 20, stop_n_mult: 2.0,
+      use_filter: true, x_risk: 0.00875, cap: 0.2}
+  - strategy: xsmom
+    weight: 0.5
+    params: {mom_n: 244, skip_n: 21, top_k: 5, atr_n: 20, atr_m: 3.0, x_risk: 0.00875,
+      cap: 0.2}
+capital: 100000.0

@@ -1,0 +1,15 @@
+# v3 规则化选样篮子(scripts/select_universe_v3.py 生成,CUT=2021-07-01,M=20);
+# 等分槽口径:cap=1/M、x_risk=(0.35/8)/M。选样规则见脚本 docstring。
+name: donchian_etf_v3
+strategy: donchian
+sec_type: etf
+universe: ["510300", "159915", "512010", "510420", "159995", "512660", "512690", "513050", "512400", "515220", "510900", "513500", "159941", "513030", "518880", "159980", "159985", "511010", "515100", "159962"]
+lookback: 750
+params:
+  n_entry: 55
+  n_exit: 20
+  atr_n: 20
+  atr_m: 3.0
+  x_risk: 0.002187
+  cap: 0.05
+  exit_mode: atr
