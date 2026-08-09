@@ -31,6 +31,7 @@ args 中的 "__C__" 占位会替换为真实 ContextInfo(passorder 末参数约�
 线程敏感的接口如遇问题,改在定时任务中调用后经文件桥接。
 """
 import hmac
+import ipaddress
 import json
 import socket
 import threading
@@ -40,7 +41,9 @@ HOST = "127.0.0.1"      # 远程访问优先走 SSH 隧道(保持 127.0.0.1);
 PORT = 58620            # 用 Tailscale 时改绑 100.x 虚拟网卡 IP
 TOKEN = ""              # 非 127.0.0.1 绑定必须非空;建议 ≥32 位随机串
 ALLOW_TRADE = True      # False = 只读通道:拒绝交易类函数,查询照常
-ALLOW_IPS = []          # 额外 IP 白名单(空=不限;直接暴露时务必配置)
+# IP 白名单(网络层物理隔离,非本机绑定强制非空):支持单 IP 与 CIDR 网段,
+# 例 ["100.64.0.0/10"](Tailscale 全网段)或 ["100.101.102.103", "1.2.3.4"]
+ALLOW_IPS = []
 
 _TRADE_FNS = {"passorder", "cancel", "cancel_task"}   # 交易类函数名(按需扩展)
 _C = None
@@ -92,11 +95,28 @@ def _token_ok(supplied, token):
     return hmac.compare_digest(str(supplied or ""), token)
 
 
+def ip_allowed(ip, allow_list):
+    """白名单判定:支持单 IP 与 CIDR 网段;列表为空 = 不限(仅限本机绑定)。"""
+    if not allow_list:
+        return True
+    addr = ipaddress.ip_address(ip)
+    for entry in allow_list:
+        try:
+            if "/" in str(entry):
+                if addr in ipaddress.ip_network(str(entry), strict=False):
+                    return True
+            elif addr == ipaddress.ip_address(str(entry)):
+                return True
+        except ValueError:
+            continue                            # 配置写错的条目跳过,不放行
+    return False
+
+
 # --------------------------------------------------------------------------
 # socket 服务
 # --------------------------------------------------------------------------
 def _handle(conn, addr, namespace, C, token, allow_trade, allow_ips):
-    if allow_ips and addr[0] not in allow_ips:
+    if not ip_allowed(addr[0], allow_ips):
         print("[rpc] 拒绝非白名单来源:", addr[0])
         conn.close()
         return
@@ -133,12 +153,17 @@ def serve(namespace, C, host=HOST, port=PORT, token=TOKEN,
           allow_trade=ALLOW_TRADE, allow_ips=None):
     """启动转发服务(每连接一线程);返回监听 socket(测试用)。
 
-    安全强制:非 127.0.0.1 绑定必须配置非空 token,否则拒绝启动。
+    安全强制:非 127.0.0.1 绑定必须同时配置 非空 token + 非空 IP 白名单
+    (网络层物理隔离 + 应用层口令,缺一拒绝启动)。
     """
-    if host not in ("127.0.0.1", "localhost") and not token:
-        raise ValueError("非本机绑定(%s)必须配置非空 TOKEN——远程访问请优先"
-                         "走 SSH 隧道/Tailscale,token 只是第二道锁" % host)
     allow_ips = list(allow_ips if allow_ips is not None else ALLOW_IPS)
+    if host not in ("127.0.0.1", "localhost"):
+        if not token:
+            raise ValueError("非本机绑定(%s)必须配置非空 TOKEN——远程访问请"
+                             "优先走 SSH 隧道/Tailscale,token 只是第二道锁" % host)
+        if not allow_ips:
+            raise ValueError("非本机绑定(%s)必须配置 ALLOW_IPS 白名单"
+                             "(单 IP 或 CIDR,如 Tailscale 的 100.64.0.0/10)" % host)
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind((host, port))

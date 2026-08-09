@@ -110,7 +110,30 @@ def test_readonly_channel_blocks_trade_allows_query():
     srv.close()
 
 
-def test_remote_bind_requires_token():
-    """非 127.0.0.1 绑定必须配 token,否则拒绝启动(防裸奔公网)。"""
+def test_remote_bind_requires_token_and_allowlist():
+    """非 127.0.0.1 绑定必须同时配 token + IP 白名单,缺一拒绝启动。"""
     with pytest.raises(ValueError, match="TOKEN"):
         rpc_server.serve({}, _FakeC(), host="0.0.0.0", port=0, token="")
+    with pytest.raises(ValueError, match="ALLOW_IPS"):
+        rpc_server.serve({}, _FakeC(), host="0.0.0.0", port=0, token="t",
+                         allow_ips=[])
+
+
+def test_ip_allowlist_cidr_and_rejection():
+    """白名单支持单 IP 与 CIDR;不在名单的连接在握手层被断开。"""
+    assert rpc_server.ip_allowed("100.101.102.103", ["100.64.0.0/10"])
+    assert rpc_server.ip_allowed("1.2.3.4", ["1.2.3.4"])
+    assert not rpc_server.ip_allowed("8.8.8.8", ["100.64.0.0/10", "1.2.3.4"])
+    assert not rpc_server.ip_allowed("8.8.8.8", ["写错的条目"])   # 坏配置不放行
+    # 连接级拒绝:白名单不含 127.0.0.1 → 本地连接被立即断开
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    srv = rpc_server.serve({}, _FakeC(), port=port, token="t",
+                           allow_ips=["10.9.9.9"])
+    cli = qmt_sdk._Client()
+    cli.connect("127.0.0.1", port, token="t")
+    with pytest.raises(qmt_sdk.QmtRpcError, match="断开"):
+        cli.call("anything")
+    cli.close()
+    srv.close()
