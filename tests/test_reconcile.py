@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from trend.live.broker import QmtShellBroker
-from trend.live.reconcile import ReconcileReport, reconcile
-from trend.live.targets import build_payload
+from sinan.live.broker import QmtShellBroker
+from sinan.live.reconcile import ReconcileReport, reconcile
+from sinan.live.targets import build_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 

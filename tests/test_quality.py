@@ -7,8 +7,8 @@
 import pandas as pd
 import pytest
 
-from trend.data.quality import check
-from trend.data.store import DataStore
+from sinan.data.quality import check
+from sinan.data.store import DataStore
 
 D = pd.Timestamp("2024-01-10")      # 周三,交易日
 SAT = pd.Timestamp("2024-01-13")    # 周六,非交易日
@@ -82,7 +82,7 @@ def test_non_trading_day_ok(store):
 
 
 def test_explicit_calendar_param(store):
-    from trend.calendar import TradeCalendar
+    from sinan.calendar import TradeCalendar
     cal = TradeCalendar(pd.date_range("2024-01-01", "2024-01-31", freq="B"))
     assert check(store, SAT, calendar=cal).ok
     rep = check(store, D, calendar=cal)   # 交易日全缺 K 线 → 三只存续标的 missing_bar

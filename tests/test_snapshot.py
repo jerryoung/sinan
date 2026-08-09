@@ -10,9 +10,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from trend.backtest.engine import run_backtest
-from trend.backtest.result import TRADE_COLS
-from trend.signal.base import register
+from sinan.backtest.engine import run_backtest
+from sinan.backtest.result import TRADE_COLS
+from sinan.signal.base import register
 
 from tests.test_engine import cfg_for, make_bars, seed_store, settings_with
 

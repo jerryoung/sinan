@@ -10,11 +10,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trend.config import load_rules, load_strategy
-from trend.signal.base import SignalContext, get_strategy
-from trend.signal.strategies.livermore import _atr
-from trend.signal.strategies.ma_cross import _replay_weight
-from trend.universe.instruments import resolve_rule
+from sinan.config import load_rules, load_strategy
+from sinan.signal.base import SignalContext, get_strategy
+from sinan.signal.strategies.livermore import _atr
+from sinan.signal.strategies.ma_cross import _replay_weight
+from sinan.universe.instruments import resolve_rule
 
 ROOT = Path(__file__).resolve().parents[1]
 

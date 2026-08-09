@@ -26,11 +26,11 @@ def main() -> int:
 
     import pandas as pd
 
-    from trend.config import load_settings
-    from trend.data.sources.akshare_source import AkshareSource
-    from trend.data.store import DataStore
-    from trend.data.update import run_daily
-    from trend.live.notify import notify
+    from sinan.config import load_settings
+    from sinan.data.sources.akshare_source import AkshareSource
+    from sinan.data.store import DataStore
+    from sinan.data.update import run_daily
+    from sinan.live.notify import notify
 
     settings = load_settings()
     store = DataStore(settings.store_root)
@@ -41,7 +41,7 @@ def main() -> int:
     # 主源 akshare;tushare 备源可选(token 缺失等不可用时降级为单源)
     sources = [AkshareSource()]
     try:
-        from trend.data.sources.tushare_source import TushareSource
+        from sinan.data.sources.tushare_source import TushareSource
         sources.append(TushareSource())
     except Exception as e:  # noqa: BLE001
         notify_fn(f"tushare 备源不可用,仅用主源: {e}", level="warning")

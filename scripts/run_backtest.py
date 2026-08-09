@@ -25,10 +25,10 @@ def main() -> int:
                     help="HTML 报告输出路径,缺省 reports/<name>_<start>_<end>.html")
     args = ap.parse_args()
 
-    from trend.backtest.engine import run_backtest
-    from trend.backtest.report import compute_stats, render_html
-    from trend.config import load_settings, load_strategy
-    from trend.data.store import DataStore
+    from sinan.backtest.engine import run_backtest
+    from sinan.backtest.report import compute_stats, render_html
+    from sinan.config import load_settings, load_strategy
+    from sinan.data.store import DataStore
 
     settings = load_settings()
     cfg = load_strategy(args.strategy)

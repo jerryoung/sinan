@@ -118,8 +118,8 @@ def main() -> int:
                     help="生成 config/strategies/{donchian,turtle_s1}_etf_v3.yaml")
     args = ap.parse_args()
 
-    from trend.config import load_settings
-    from trend.data.store import DataStore
+    from sinan.config import load_settings
+    from sinan.data.store import DataStore
 
     store = DataStore(load_settings().store_root)
     picked, names, cat_of = run_selection(store, args.dedup_csv, args.cut)

@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trend.config import load_rules, load_strategy
-from trend.signal.base import SignalContext, get_strategy, register
-from trend.universe.instruments import resolve_rule
+from sinan.config import load_rules, load_strategy
+from sinan.signal.base import SignalContext, get_strategy, register
+from sinan.universe.instruments import resolve_rule
 
 ROOT = Path(__file__).resolve().parents[1]
 

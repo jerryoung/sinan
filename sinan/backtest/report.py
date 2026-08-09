@@ -38,8 +38,8 @@ import numpy as np
 import pandas as pd
 from matplotlib import font_manager
 
-from trend.backtest.result import BacktestResult
-from trend.config import TRADING_DAYS
+from sinan.backtest.result import BacktestResult
+from sinan.config import TRADING_DAYS
 
 # CJK 字体:Noto(Linux)→ PingFang(macOS),找不到静默回退(只影响图中中文显示)
 for _fp in ["/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",

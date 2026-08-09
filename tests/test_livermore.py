@@ -6,11 +6,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trend.config import load_rules, load_strategy
-from trend.signal.base import SignalContext, get_strategy
-from trend.signal.strategies.livermore import _replay_weight
-from trend.universe.cb_terms import EVT_REDEEM_ANNOUNCE, CBEvent, CBTerms
-from trend.universe.instruments import resolve_rule
+from sinan.config import load_rules, load_strategy
+from sinan.signal.base import SignalContext, get_strategy
+from sinan.signal.strategies.livermore import _replay_weight
+from sinan.universe.cb_terms import EVT_REDEEM_ANNOUNCE, CBEvent, CBTerms
+from sinan.universe.instruments import resolve_rule
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -78,7 +78,7 @@ def _append(df, closes, spread=0.1):
 
 def _entry_anchor(df):
     """重放并返回 (入场bar下标, 入场价, 入场ATR, 事件表)。要求确实入场。"""
-    from trend.signal.strategies.livermore import _atr
+    from sinan.signal.strategies.livermore import _atr
     ev = []
     _replay_weight(df, **P, events=ev)
     tags = [t for _, t in ev]

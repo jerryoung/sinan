@@ -21,14 +21,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trend.data.bootstrap import (
+from sinan.data.bootstrap import (
     bootstrap_calendar,
     bootstrap_cb,
     bootstrap_etf,
     bootstrap_stock,
 )
-from trend.data.store import DataStore
-from trend.universe.cb_terms import EVT_LAST_TRADE_DAY, EVT_REDEEM_ANNOUNCE
+from sinan.data.store import DataStore
+from sinan.universe.cb_terms import EVT_LAST_TRADE_DAY, EVT_REDEEM_ANNOUNCE
 
 FIX = Path(__file__).parent / "fixtures"
 STOCK_CSV = FIX / "stock_sample.csv"

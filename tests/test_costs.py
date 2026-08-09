@@ -10,11 +10,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trend.backtest.costs import cash_delta, trade_cost
-from trend.backtest.engine import run_backtest
-from trend.backtest.execution_model import exec_price, fillable, prepare_market
-from trend.config import load_rules
-from trend.universe.instruments import resolve_rule
+from sinan.backtest.costs import cash_delta, trade_cost
+from sinan.backtest.engine import run_backtest
+from sinan.backtest.execution_model import exec_price, fillable, prepare_market
+from sinan.config import load_rules
+from sinan.universe.instruments import resolve_rule
 
 from tests.test_engine import DAYS, cfg_for, make_bars, seed_store, settings_with
 

@@ -1,16 +1,16 @@
 """Task 7 执行层测试:targets 风控裁剪 / payload 校验和往返 / 各失败分支 / ManualBroker / notify。
 
-只 import trend.live.* 与已定契约(config),不触碰其他 Agent 并行编写的模块。
+只 import sinan.live.* 与已定契约(config),不触碰其他 Agent 并行编写的模块。
 """
 import json
 from datetime import datetime, timedelta
 
 import pytest
 
-from trend.config import RiskCfg, Settings
-from trend.live.broker import ManualBroker, MiniQmtBroker
-from trend.live.notify import notify
-from trend.live.targets import (
+from sinan.config import RiskCfg, Settings
+from sinan.live.broker import ManualBroker, MiniQmtBroker
+from sinan.live.notify import notify
+from sinan.live.targets import (
     TargetsInvalid,
     apply_risk,
     build_payload,
@@ -260,7 +260,7 @@ def test_notify_webhook_error_swallowed(monkeypatch):
 
 # ---------------------------------------------------------------- 持仓数上限
 def test_limit_positions_noop_under_limit():
-    from trend.live.targets import limit_positions
+    from sinan.live.targets import limit_positions
     tgt = {"A": 0.1, "B": 0.2}
     out, msgs = limit_positions(tgt, {}, 2)
     assert out == tgt and msgs == []
@@ -270,7 +270,7 @@ def test_limit_positions_noop_under_limit():
 
 def test_limit_positions_blocks_new_entrant():
     """已持仓优先:新信号权重再大也不挤出持仓,超额新入场被裁 0。"""
-    from trend.live.targets import limit_positions
+    from sinan.live.targets import limit_positions
     out, msgs = limit_positions({"A": 0.05, "C": 0.50}, {"A": 0.05}, 1)
     assert out["A"] == 0.05 and out["C"] == 0.0
     assert any("C" in m for m in msgs)
@@ -278,7 +278,7 @@ def test_limit_positions_blocks_new_entrant():
 
 def test_limit_positions_trims_overheld():
     """持仓本身超限(如调低上限后):按权重保留前 max_n,其余裁 0。"""
-    from trend.live.targets import limit_positions
+    from sinan.live.targets import limit_positions
     cur = {"A": 0.1, "B": 0.1, "C": 0.1}
     out, _ = limit_positions({"A": 0.30, "B": 0.10, "C": 0.20}, cur, 2)
     assert out["A"] == 0.30 and out["C"] == 0.20 and out["B"] == 0.0
@@ -296,7 +296,7 @@ def test_apply_risk_max_positions_wired():
 
 # ---------------------------------------------------------------- 参考委托单
 def test_ref_orders_lot_rounding_and_sides():
-    from trend.live.targets import build_ref_orders
+    from sinan.live.targets import build_ref_orders
     orders = build_ref_orders(
         {"A": 0.10, "B": 0.0}, current_weights={"B": 0.05}, capital=1_000_000,
         prices={"A": 4.567, "B": 100.0}, lot_sizes={"A": 100, "B": 10})
@@ -309,7 +309,7 @@ def test_ref_orders_lot_rounding_and_sides():
 
 
 def test_ref_orders_band_and_zero_qty_skipped():
-    from trend.live.targets import build_ref_orders
+    from sinan.live.targets import build_ref_orders
     orders = build_ref_orders(
         {"A": 0.011, "C": 0.0001}, current_weights={}, capital=1_000_000,
         prices={"A": 5.0, "C": 5.0}, lot_sizes={"A": 100, "C": 100},
@@ -322,7 +322,7 @@ def test_ref_orders_band_and_zero_qty_skipped():
 
 
 def test_ref_orders_missing_price_skipped():
-    from trend.live.targets import build_ref_orders
+    from sinan.live.targets import build_ref_orders
     orders = build_ref_orders({"A": 0.1, "B": 0.1}, current_weights={},
                               capital=1e6, prices={"B": 2.0}, lot_sizes={})
     assert [o["symbol"] for o in orders] == ["B"]

@@ -23,9 +23,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trend.config import ROOT, load_strategy
-from trend.signal.base import SignalContext, get_strategy
-from trend.universe.cb_terms import EVT_REDEEM_ANNOUNCE, CBEvent, CBTerms
+from sinan.config import ROOT, load_strategy
+from sinan.signal.base import SignalContext, get_strategy
+from sinan.universe.cb_terms import EVT_REDEEM_ANNOUNCE, CBEvent, CBTerms
 
 # 与场景基线对应的手算常量
 X_RISK, ATR_M, ATR0, C_ENTRY = 0.025, 3.0, 0.4, 11.0

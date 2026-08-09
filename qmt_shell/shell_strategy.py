@@ -9,7 +9,7 @@ QMT 薄壳策略模板(方案 §8.1)——放进标准版 QMT 的那约 100 行,
 
 本文件在本地环境不可执行(passorder / get_trade_detail_data / C 由 QMT
 运行时注入),仅作部署模板;换券商/换通道时需要重写的也只有这一个文件。
-校验和算法必须与 trend/live/targets.py 保持逐字节一致(两侧各持一份拷贝,
+校验和算法必须与 sinan/live/targets.py 保持逐字节一致(两侧各持一份拷贝,
 因为薄壳不 import 本地包——这正是文件桥接解耦的代价与全部代价)。
 """
 import hashlib
@@ -18,9 +18,9 @@ import os
 from datetime import datetime
 
 # ---- 部署时按实际环境修改的参数 -------------------------------------------
-TARGETS_DIR = r"D:\trend\runtime\targets"   # 与本地系统共享的目录(同步盘)
+TARGETS_DIR = r"D:\sinan\var\runtime\targets"   # 与本地系统共享的目录(同步盘)
 STRATEGY_NAME = "combo_turtle_xsmom_x2"     # 本壳绑定的策略(一壳一策略)
-FILLS_DIR = r"D:\trend\runtime\fills"
+FILLS_DIR = r"D:\sinan\var\runtime\fills"
 ACCOUNT = "8888888888"                      # 资金账号
 ACCOUNT_TYPE = "STOCK"
 MAX_AGE_HOURS = 8.0                         # targets 时效,与 settings.risk 一致
@@ -42,7 +42,7 @@ def init(C):
 
 
 def _checksum(targets):
-    """与 trend/live/targets.py::targets_checksum 同算法(键排序+紧凑分隔)。"""
+    """与 sinan/live/targets.py::targets_checksum 同算法(键排序+紧凑分隔)。"""
     s = json.dumps(targets, sort_keys=True, separators=(",", ":"),
                    ensure_ascii=False, default=str)
     return hashlib.sha256(s.encode("utf-8")).hexdigest()

@@ -28,8 +28,8 @@ import yaml
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from trend.config import StrategyCfg, load_settings, load_strategy  # noqa: E402
-from trend.data.store import DataStore                                          # noqa: E402
+from sinan.config import StrategyCfg, load_settings, load_strategy  # noqa: E402
+from sinan.data.store import DataStore                                          # noqa: E402
 
 NAV_COLOR = "#4269D0"
 DD_COLOR = "#C4433F"
@@ -506,8 +506,8 @@ with tab_bt:
 
     report_sel_key = f"bt_report_sel_{sel_name}"
     if st.button("▶ 运行回测", type="primary"):
-        from trend.backtest.engine import run_backtest
-        from trend.backtest.report import compute_stats, render_html
+        from sinan.backtest.engine import run_backtest
+        from sinan.backtest.report import compute_stats, render_html
         cfg = load_strategy(sel_run)
         cfg_snap = sel_run.read_text(encoding="utf-8")   # 回测时的配置快照
         settings_ = load_settings()
@@ -515,7 +515,7 @@ with tab_bt:
             res = run_backtest(get_store(), cfg, settings_, start=start, end=end,
                                initial_capital=cfg.capital or settings_.capital)
             stats = compute_stats(res)
-            out = ROOT / "reports" / f"{cfg.name}_{start}_{end}.html"
+            out = settings_.reports_dir / f"{cfg.name}_{start}_{end}.html"
             render_html(res, stats, out)                       # 归档/导出件
             out.with_suffix(".cfg.yaml").write_text(cfg_snap, encoding="utf-8")
             save_result_json(res, stats, result_sidecar(out))  # 页面渲染数据源
@@ -524,7 +524,7 @@ with tab_bt:
 
     st.divider()
     st.subheader(f"回测报告(策略:{sel_name})")
-    reports = sorted((p for p in (ROOT / "reports").glob("*.html")
+    reports = sorted((p for p in Path(load_settings().reports_dir).glob("*.html")
                       if p.name.startswith(sel_name + "_")),
                      key=lambda p: p.stat().st_mtime, reverse=True)
     if not reports:

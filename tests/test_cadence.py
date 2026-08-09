@@ -2,9 +2,9 @@
 import numpy as np
 import pandas as pd
 
-from trend.config import load_rules
-from trend.signal.base import SignalContext, get_strategy, register
-from trend.universe.instruments import resolve_rule
+from sinan.config import load_rules
+from sinan.signal.base import SignalContext, get_strategy, register
+from sinan.universe.instruments import resolve_rule
 
 CALLS = []
 

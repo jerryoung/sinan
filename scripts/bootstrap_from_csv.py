@@ -21,9 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from loguru import logger  # noqa: E402
 
-from trend.config import load_settings  # noqa: E402
-from trend.data import bootstrap as bs  # noqa: E402
-from trend.data.store import DataStore  # noqa: E402
+from sinan.config import load_settings  # noqa: E402
+from sinan.data import bootstrap as bs  # noqa: E402
+from sinan.data.store import DataStore  # noqa: E402
 
 FILES = {
     "stock": "stock_market_data.csv",

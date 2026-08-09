@@ -11,12 +11,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trend.backtest.engine import run_backtest
-from trend.config import ExecutionCfg, Settings, StrategyCfg, load_rules
-from trend.data.store import DataStore
-from trend.signal.base import register
-from trend.universe.cb_terms import EVT_LAST_TRADE_DAY
-from trend.universe.instruments import resolve_rule
+from sinan.backtest.engine import run_backtest
+from sinan.config import ExecutionCfg, Settings, StrategyCfg, load_rules
+from sinan.data.store import DataStore
+from sinan.signal.base import register
+from sinan.universe.cb_terms import EVT_LAST_TRADE_DAY
+from sinan.universe.instruments import resolve_rule
 
 DAYS = pd.date_range("2024-01-01", periods=8, freq="B")   # 8 个合成交易日
 RULES = load_rules()
@@ -310,7 +310,7 @@ def test_negative_clip_and_rescale(tmp_path):
 # 持仓数上限:settings.risk.max_positions 在引擎侧生效(与实盘同一实现)
 # --------------------------------------------------------------------------
 def test_engine_max_positions(tmp_path):
-    from trend.config import RiskCfg
+    from sinan.config import RiskCfg
     A, B, C = "510300", "510500", "518880"
     store = seed_store(tmp_path, [make_bars(s, DAYS, [10.0] * 8) for s in (A, B, C)])
     # d0 信号:三只同时给权重,B 最大、C 最小 → 上限 2 只应裁掉 C

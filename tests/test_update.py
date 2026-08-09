@@ -6,10 +6,10 @@ FakeSource 继承 DataSource,持有内存 DataFrame;fail 集合指定哪些方�
 import pandas as pd
 import pytest
 
-from trend.data.sources.base import DataSource, DataSourceError
-from trend.data.store import DataStore
-from trend.data.update import UpdateResult, run_daily
-from trend.universe.cb_terms import EVT_REDEEM_ANNOUNCE
+from sinan.data.sources.base import DataSource, DataSourceError
+from sinan.data.store import DataStore
+from sinan.data.update import UpdateResult, run_daily
+from sinan.universe.cb_terms import EVT_REDEEM_ANNOUNCE
 
 D = pd.Timestamp("2024-01-10")                          # 周三,交易日
 CAL = pd.date_range("2023-12-01", "2024-01-31", freq="B")

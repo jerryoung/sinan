@@ -36,15 +36,15 @@ def main() -> int:
 
     import pandas as pd
 
-    from trend.config import load_rules, load_settings, load_strategy
-    from trend.data.store import DataStore
-    from trend.live.broker import QmtShellBroker
-    from trend.live.notify import notify
-    from trend.live.targets import (apply_risk, build_payload, build_ref_orders,
+    from sinan.config import load_rules, load_settings, load_strategy
+    from sinan.data.store import DataStore
+    from sinan.live.broker import QmtShellBroker
+    from sinan.live.notify import notify
+    from sinan.live.targets import (apply_risk, build_payload, build_ref_orders,
                                     save_targets)
-    from trend.signal.base import SignalContext, get_strategy
-    from trend.universe.cb_terms import build_cb_terms
-    from trend.universe.instruments import resolve_rule
+    from sinan.signal.base import SignalContext, get_strategy
+    from sinan.universe.cb_terms import build_cb_terms
+    from sinan.universe.instruments import resolve_rule
 
     settings = load_settings()
     cfg = load_strategy(args.strategy)

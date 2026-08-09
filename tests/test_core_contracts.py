@@ -3,12 +3,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trend.calendar import TradeCalendar
-from trend.config import load_rules, load_settings, load_strategy
-from trend.data.store import DataStore
-from trend.signal.base import SignalContext, get_strategy, register
-from trend.universe.cb_terms import EVT_REDEEM_ANNOUNCE, CBEvent, CBTerms, build_cb_terms
-from trend.universe.instruments import resolve_rule
+from sinan.calendar import TradeCalendar
+from sinan.config import load_rules, load_settings, load_strategy
+from sinan.data.store import DataStore
+from sinan.signal.base import SignalContext, get_strategy, register
+from sinan.universe.cb_terms import EVT_REDEEM_ANNOUNCE, CBEvent, CBTerms, build_cb_terms
+from sinan.universe.instruments import resolve_rule
 
 
 def _bars(symbol, dates, base=10.0):

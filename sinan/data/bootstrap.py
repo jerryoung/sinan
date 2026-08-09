@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 
-from trend.universe.cb_terms import EVT_LAST_TRADE_DAY, EVT_REDEEM_ANNOUNCE
+from sinan.universe.cb_terms import EVT_LAST_TRADE_DAY, EVT_REDEEM_ANNOUNCE
 
 # 判定"已停止交易"的回看窗口:最后交易日早于全表最大交易日 5 个交易日以上视为退市。
 # 5 天与转债"强赎公告→摘牌"最短流程量级一致,也吞掉了数据源末尾 1-2 天的更新延迟。

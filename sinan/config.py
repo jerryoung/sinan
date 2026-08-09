@@ -43,10 +43,10 @@ class Settings(BaseModel):
     # 名义本金:影子模式出参考委托单、回测默认初始资金用;实盘接入 QMT 后
     # 以 fills 回报的 total_asset 为准,此值仅作无回报时的兜底
     capital: float = 1_000_000.0
-    store_root: Path = Path("store")
-    targets_dir: Path = Path("runtime/targets")
-    fills_dir: Path = Path("runtime/fills")
-    reports_dir: Path = Path("reports")
+    store_root: Path = Path("var/store")
+    targets_dir: Path = Path("var/runtime/targets")
+    fills_dir: Path = Path("var/runtime/fills")
+    reports_dir: Path = Path("var/reports")
     wecom_webhook: str = ""
     execution: ExecutionCfg = Field(default_factory=ExecutionCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)

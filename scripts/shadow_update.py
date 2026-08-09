@@ -39,8 +39,8 @@ def main() -> int:
     import numpy as np
     import pandas as pd
 
-    from trend.config import load_settings, load_strategy
-    from trend.data.store import DataStore
+    from sinan.config import load_settings, load_strategy
+    from sinan.data.store import DataStore
 
     settings = load_settings()
     store = DataStore(settings.store_root)

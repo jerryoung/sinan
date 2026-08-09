@@ -47,9 +47,9 @@ def main() -> int:
     import pandas as pd
 
     from select_universe_v3 import run_selection
-    from trend.config import StrategyCfg, load_settings
-    from trend.backtest.engine import run_backtest
-    from trend.data.store import DataStore
+    from sinan.config import StrategyCfg, load_settings
+    from sinan.backtest.engine import run_backtest
+    from sinan.data.store import DataStore
 
     settings = load_settings()
     store = DataStore(settings.store_root)
@@ -100,7 +100,7 @@ def main() -> int:
         print(f"  {strat:10s}: 年化 {ann*100:5.1f}%  回撤 {mdd*100:6.1f}%  "
               f"夏普 {shp:5.2f}  Calmar {ann/abs(mdd):5.2f}")
 
-    out = ROOT / "reports" / "rolling_walkforward_returns.csv"
+    out = ROOT / "var" / "reports" / "rolling_walkforward_returns.csv"
     pd.DataFrame(results).to_csv(out)
     print(f"\n逐日收益已存 {out}")
     return 0

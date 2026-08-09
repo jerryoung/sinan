@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trend.backtest.report import compute_stats, render_html
-from trend.backtest.result import TRADE_COLS, BacktestResult
+from sinan.backtest.report import compute_stats, render_html
+from sinan.backtest.result import TRADE_COLS, BacktestResult
 
 N_DAYS = 200
 SYMS = ["510300", "518880", "513100"]

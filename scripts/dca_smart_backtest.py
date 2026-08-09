@@ -47,8 +47,8 @@ def main() -> int:
     import numpy as np
     import pandas as pd
 
-    from trend.config import load_settings
-    from trend.data.store import DataStore
+    from sinan.config import load_settings
+    from sinan.data.store import DataStore
 
     store = DataStore(load_settings().store_root)
     all_syms = sorted({s for b in BASKETS.values() for s in b})
@@ -105,7 +105,7 @@ def main() -> int:
         "总投入": lambda x: f"{x:,.0f}", "期末市值": lambda x: f"{x:,.0f}",
         "累计收益": lambda x: f"{x*100:6.1f}%", "年化IRR": lambda x: f"{x*100:5.1f}%",
         "最大浮亏": lambda x: f"{x*100:6.1f}%"}))
-    out = ROOT / "reports" / "dca_smart_matrix.csv"
+    out = ROOT / "var" / "reports" / "dca_smart_matrix.csv"
     df.to_csv(out, index=False)
     print(f"\n结果已存 {out}")
     return 0

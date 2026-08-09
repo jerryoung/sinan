@@ -1,10 +1,10 @@
 # 全局配置。相对路径基于项目根(trend/)。
 capital: 1000000              # 名义本金:影子模式参考委托单与回测默认初始资金;
                               # 实盘接入后以 QMT fills 回报的 total_asset 为准
-store_root: store             # parquet + DuckDB 数据仓
-targets_dir: runtime/targets  # targets_YYYYMMDD.json 输出目录(与 QMT 薄壳共享)
-fills_dir: runtime/fills      # QMT 薄壳回写的成交回报
-reports_dir: reports          # 回测 HTML 报告
+store_root: var/store             # parquet + DuckDB 数据仓
+targets_dir: var/runtime/targets  # targets_YYYYMMDD.json 输出目录(与 QMT 薄壳共享)
+fills_dir: var/runtime/fills      # QMT 薄壳回写的成交回报
+reports_dir: var/reports          # 回测 HTML 报告
 
 wecom_webhook: ""             # 企业微信群机器人 webhook,空则只写本地日志
 

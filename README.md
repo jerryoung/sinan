@@ -23,11 +23,11 @@ pip install pandas numpy duckdb pyarrow pydantic pyyaml loguru pytest streamlit 
 python3 scripts/bootstrap_from_csv.py --types etf,cb
 python3 scripts/bootstrap_from_csv.py --types stock --start 2015
 
-# 2) 回测(输出报告三件套到 reports/)
+# 2) 回测(输出报告三件套到 var/reports/)
 python3 scripts/run_backtest.py --strategy config/strategies/combo_turtle_xsmom_x2.yaml \
     --start 2015-01-05 --end 2026-08-07
 
-# 3) 影子模式:拉数 → 质检 → 生成当日目标仓位(runtime/targets/)
+# 3) 影子模式:拉数 → 质检 → 生成当日目标仓位(var/runtime/targets/)
 python3 scripts/shadow_update.py --strategy config/strategies/combo_turtle_xsmom_x2.yaml
 
 # 4) 操作面板(影子模式 / 策略配置 / 回测 / 数据查询)
@@ -40,20 +40,21 @@ python3 -m pytest tests/ -q
 ## 目录结构
 
 ```
-config/            settings.yaml(本金/路径/执行/风控)· rules.yaml(品种规则)· strategies/*.yaml
-trend/             Python 包(包名保留 trend,刻意不随项目改名——避免全量 import 重构)
+sinan/             Python 包(核心代码,与项目同名)
   ├ data/          DataStore(parquet 按年分区 + DuckDB)· bootstrap · 日更 · 质检 · 数据源适配
   ├ universe/      交易规则推断(板块/T+0/涨跌幅)· 转债条款与强赎事件
   ├ signal/        SignalContext + 策略注册表 + strategies/(全部策略实现)
   ├ backtest/      engine(逐日循环)· execution_model · costs · report(指标+HTML)
   └ live/          targets(风控裁剪/留痕/校验)· broker · reconcile · notify
-qmt_shell/         ~100 行 QMT 薄壳模板(不含策略逻辑,绑定 STRATEGY_NAME)
+config/            settings.yaml(本金/路径/执行/风控)· rules.yaml(品种规则)· strategies/*.yaml
 scripts/           bootstrap / daily_update / shadow_update / run_signal / run_backtest / 研究脚本
+qmt_shell/         ~100 行 QMT 薄壳模板(不含策略逻辑,绑定 STRATEGY_NAME)
 app.py             Streamlit 操作面板
 docs/RESEARCH.md   研究档案:全部实验结论表与决策记录
+var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fills)· reports
 ```
 
-## 策略清单(trend/signal/strategies/)
+## 策略清单(sinan/signal/strategies/)
 
 | 策略 | 思想 | 定位 |
 |---|---|---|
