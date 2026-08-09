@@ -17,15 +17,10 @@ exec-date 缺省 = 数据最新日的下一个工作日(周末顺延,未剔节�
 import argparse
 import subprocess
 import sys
-import time
-from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-
-JUMP_MAX = 0.11        # 质检:接缝/日内变动阈值(涨跌幅限制 10% + 容差)
-
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="影子模式:更新数据并生成目标仓位")
@@ -38,7 +33,6 @@ def main() -> int:
                     help="只更新数据不出信号(数据中心·数据更新页用)")
     args = ap.parse_args()
 
-    import numpy as np
     import pandas as pd
 
     from sinan.config import load_settings, load_strategy
@@ -50,67 +44,16 @@ def main() -> int:
     universe = [str(s) for s in cfg.universe]
 
     if not args.skip_update:
-        import akshare as ak
-
-        last = store.read_bars(symbols=universe, sec_type=cfg.sec_type)["date"].max()
-        start = (pd.Timestamp(last) + pd.Timedelta(days=1)).date()
-        today = date.today()
-        if start > today:
-            print(f"数据已是最新({last.date()}),跳过更新")
-        else:
-            print(f"增量拉取 {start} → {today}({len(universe)} 只)...")
-            rows, fails = [], []
-            for s in universe:
-                pre = "sh" if s.startswith(("5", "6")) else "sz"
-                try:
-                    df = ak.fund_etf_hist_sina(symbol=pre + s)
-                    df["date"] = pd.to_datetime(df["date"])
-                    df = df[(df["date"] >= pd.Timestamp(start))
-                            & (df["date"] <= pd.Timestamp(today))]
-                    if len(df):
-                        rows.append(df.assign(symbol=s)[
-                            ["symbol", "date", "open", "high", "low", "close", "volume"]])
-                    time.sleep(0.25)
-                except Exception as e:              # noqa: BLE001 逐只兜底,末端统一报告
-                    fails.append((s, str(e)[:60]))
-            if fails:
-                print("拉取失败,终止:", fails)
-                return 1
-            if rows:
-                bars = pd.concat(rows, ignore_index=True)
-                for c in ["open", "high", "low", "close", "volume"]:
-                    bars[c] = pd.to_numeric(bars[c], errors="coerce")
-                last_fac, last_close = {}, {}
-                for s in universe:
-                    prev = store.read_bars(symbols=[s], sec_type=cfg.sec_type, end=last)
-                    last_fac[s] = float(prev["adj_factor"].iloc[-1]) if len(prev) else 1.0
-                    last_close[s] = float(prev["close"].iloc[-1]) if len(prev) else np.nan
-                bars["adj_factor"] = bars["symbol"].map(last_fac)
-                bars["amount"] = np.nan
-                bars = bars.sort_values(["symbol", "date"])
-                bars["pre_close"] = bars.groupby("symbol")["close"].shift(1)
-                head = bars.groupby("symbol")["pre_close"].head(1).index
-                bars.loc[head, "pre_close"] = bars.loc[head, "symbol"].map(last_close)
-
-                issues = []
-                bad = bars[(bars["high"] < bars["low"] - 1e-9)
-                           | (bars["close"] > bars["high"] + 1e-9)
-                           | (bars["close"] < bars["low"] - 1e-9)]
-                if len(bad):
-                    issues.append(f"OHLC 非法 {len(bad)} 行")
-                jump = (bars["close"] / bars["pre_close"] - 1).abs()
-                if (jump > JUMP_MAX).any():
-                    issues.append("跳变>%d%%: %s" % (JUMP_MAX * 100, bars.loc[
-                        jump > JUMP_MAX, ["symbol", "date"]].to_dict("records")))
-                if issues:
-                    print("质检未通过,不入库不出信号:", issues)
-                    return 1
-                store.write_bars(bars, cfg.sec_type)
-                store.write_calendar(sorted(bars["date"].unique()))
-                print(f"入库 {len(bars)} 行 / {bars['symbol'].nunique()} 只,"
-                      f"最新 {bars['date'].max().date()},质检通过")
-            else:
-                print("区间内无新数据(节假日/周末)")
+        # 共享增量模块逐标的拉取+质检;影子链路语义严格:任一失败即中止不出信号
+        from sinan.data.sina_feed import fetch_incremental
+        result = fetch_incremental(store, universe, sec_type=cfg.sec_type)
+        if result["failed"]:
+            print("拉取/质检失败,终止(不出信号):")
+            for f in result["failed"]:
+                print(f"  {f['symbol']} {f['start']}→{f['end']}:{f['error']}")
+            return 1
+        if not result["updated"]:
+            print(f"数据已是最新({result['latest']})")
 
     cutoff = store.read_bars(symbols=universe, sec_type=cfg.sec_type)["date"].max()
     if args.skip_signal:

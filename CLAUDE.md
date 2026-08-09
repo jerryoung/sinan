@@ -25,6 +25,7 @@ python3 scripts/bootstrap_from_csv.py --types etf,cb # 种子化数据仓(读 ..
 python3 scripts/run_backtest.py --strategy config/strategies/combo_turtle_xsmom_x2.yaml \
     --start 2015-01-05 --end 2026-08-07
 python3 scripts/shadow_update.py --strategy config/strategies/dca_cn_ndx_gold.yaml  # 拉数+质检+出 targets
+python3 scripts/nightly_update.py                    # 夜间增量(策略池并集,失败写 update_log.json)
 streamlit run app.py                                 # 操作面板(外层 .claude/launch.json 有预览配置)
 ```
 

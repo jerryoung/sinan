@@ -48,8 +48,11 @@ sinan/             Python 包(核心代码,与项目同名)
   └ live/          targets(风控裁剪/留痕/校验)· broker · reconcile · notify
 config/            settings.yaml(本金/路径/执行/风控)· rules.yaml(品种规则)· strategies/*.yaml
 scripts/           bootstrap / daily_update / shadow_update / run_signal / run_backtest / 研究脚本
-qmt_shell/         QMT 薄壳模板 v2(不含策略逻辑;模拟/实盘由 QMT 侧绑定账号决定,
-                   壳上报 trade_mode;下单算法/账号经 targets 的 qmt 字段按策略配置)
+qmt_shell/         QMT 桥接三件套:shell_strategy(targets 薄壳,每日批处理执行;
+                   模拟/实盘由 QMT 侧绑定账号决定、壳上报 trade_mode,下单算法/账号
+                   经 targets 的 qmt 字段按策略配置)· rpc_server(QMT 侧 API socket
+                   转发)· qmt_sdk(本地 SDK,与内置 API 同名同形:passorder/
+                   get_trade_detail_data/C.get_full_tick…,任意 API 经通用转发覆盖)
 app.py + ui/       Streamlit 操作面板(app.py 路由入口,ui/ 页面模块)
 docs/RESEARCH.md   研究档案:全部实验结论表与决策记录
 var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fills)· reports
@@ -103,14 +106,16 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 ## 操作面板(app.py + ui/)
 
 `streamlit run app.py`。左侧分组导航(st.navigation 多页架构,页面相互隔离、
-按需执行),右上角常驻"当前策略(全局)"选择器贯穿所有页面:
+按需执行);"当前策略(全局)"选择器只在量化策略模块的页面右上角出现,
+切换页面选择保持:
 
 - **量化策略**:策略看板(影子/实盘统一入口:收益统计、净值曲线、持仓详情、
   交易记录,targets 详情可展开;有 QMT fills 即实盘口径,否则影子重放)·
-  回测(一次回测=一份存档报告,配置快照可 diff)· 策略配置(表单/YAML 双模式)
+  回测(一次回测=一份存档报告,配置快照可 diff)· 策略配置(表单/YAML
+  双模式)· 设置(全局 settings.yaml 界面化编辑)
 - **数据中心**:行情查询(标的搜索 + K 线)· 数据仓概况(三品种覆盖/日历/
-  标的档案)· 数据更新(增量更新策略池、手动补数)
-- **系统**:设置(全局 settings.yaml 界面化编辑)
+  标的档案)· 数据更新(增量=全部策略池并集,手动批量同步,夜间 20:00
+  cron 自动更新——失败逐条报告标的/时间窗/原因,写 var/runtime/update_log.json)
 
 ## 研究档案
 

@@ -56,8 +56,10 @@ def cfg_label(p: Path) -> str:
 
 
 def current_sel() -> tuple[Path, str, str]:
-    """(配置路径, name, 展示名)。选择器由 app.py 常驻侧栏渲染。"""
-    p = st.session_state.get("global_cfg") or strategy_files()[0]
+    """(配置路径, name, 展示名)。选择器由 app.py 在量化策略页头部渲染;
+    _sel_path 为跨页持久值(控件未渲染时其 key 状态会被 Streamlit 回收)。"""
+    p = (st.session_state.get("global_cfg")
+         or st.session_state.get("_sel_path") or strategy_files()[0])
     try:
         d = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     except Exception:                              # noqa: BLE001
