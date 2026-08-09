@@ -126,12 +126,6 @@ STRAT_HELP = {
     "xsmom": {"mom_n": "动量回看窗口(244 ≈ 12 个月)",
               "skip_n": "跳过最近窗口(21 ≈ 1 个月,规避短期反转)",
               "top_k": "持有截面动量最强的前 k 名(且动量>0)"},
-    "tsmom": {"mom_n": "动量回看窗口(244 ≈ 12 个月)",
-              "skip_n": "跳过最近窗口(12-1 动量的 “-1”)"},
-    "ma_cross": {"fast": "快线 EMA 窗口", "slow": "慢线 EMA 窗口(快上穿慢持有)"},
-    "supertrend": {"mult": "SuperTrend 通道宽度(ATR 倍数),下轨棘轮只升不降"},
-    "rebalance": {"freq": "再平衡频率:M=月/Q=季/Y=年首个交易日;N=永不",
-                  "weights": "目标权重表(空=等权)"},
     "dca": {"start": "定投起始日 YYYY-MM-DD(写死保证可复现)",
             "freq": "定投频率:W 周 / M 月 / Q 季(首个交易日投入)",
             "amount": "每期投入总额(元),篮子内等分",
@@ -139,14 +133,11 @@ STRAT_HELP = {
             "dip_rule": "下跌加码:none 基准/dip2x 跌破年线2×/dip2x_half 跌2×涨0.5×/tiered 分档",
             "ma_n": "下跌加码的均线窗口(250≈年线)"},
 }
-ENUM_FIELDS = {"exit_mode": ["atr", "donchian"], "size_by": ["probe", "danger"],
-               "freq": ["M", "Q", "Y", "N"]}
+ENUM_FIELDS = {"exit_mode": ["atr", "donchian"], "size_by": ["probe", "danger"]}
 # 策略私有的枚举取值(覆盖 ENUM_FIELDS 同名项):可选项一律下拉,避免手填出错
 STRAT_ENUMS = {
     "dca": {"freq": ["W", "M", "Q"],
             "dip_rule": ["none", "dip2x", "dip2x_half", "tiered"]},
-    "rebalance": {"freq": ["M", "Q", "Y", "N"]},
-    "cadence": {"freq": ["W", "M"]},
 }
 
 
@@ -178,7 +169,7 @@ def params_grid(strat: str, params: dict, prefix: str) -> dict:
 
 def render_param_form(d: dict, prefix: str) -> dict:
     """按参数元数据渲染表单(带 ❓),返回编辑后的配置 dict。
-    combo(多策略组合)与 cadence(内层策略)以嵌套子表单渲染。"""
+    combo(多策略组合)以嵌套子表单渲染各腿。"""
     strat = d.get("strategy", "")
     out = copy.deepcopy(d)
     c1, c2, c3 = st.columns([2, 1, 1])
@@ -220,19 +211,6 @@ def render_param_form(d: dict, prefix: str) -> dict:
                                 f"{prefix}_leg{j}")
                 legs_out.append({"strategy": leg.get("strategy"), "weight": w, "params": p})
         out["params"] = {"legs": legs_out}
-    elif strat == "cadence":
-        inner = dict(params.get("inner", {}))
-        cad_opts = STRAT_ENUMS["cadence"]["freq"]
-        freq = st.selectbox("freq(调仓频率)", cad_opts,
-                            index=cad_opts.index(params.get("freq", "W"))
-                            if params.get("freq", "W") in cad_opts else 0,
-                            key=f"pf_{prefix}_freq",
-                            help="降频调仓:W=每周首个交易日 / M=每月首个交易日")
-        st.markdown(f"**内层策略:{inner.get('strategy', '?')}**")
-        p = params_grid(str(inner.get("strategy", "")), dict(inner.get("params", {})),
-                        f"{prefix}_inner")
-        out["params"] = {"inner": {"strategy": inner.get("strategy"), "params": p},
-                         "freq": freq}
     else:
         out["params"] = params_grid(strat, params, prefix)
     return out

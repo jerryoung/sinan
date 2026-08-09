@@ -35,7 +35,15 @@
 6. **强赎事件口径**:`redeem_status` 含"强赎"且不含"不强赎/不提前赎回"
    即记 `redeem_announce`(保守提前离场);停止交易日按最后成交日近似。
    策略层公告日起权重强制 0,引擎层末日强平(无视跌停与 T+1)。
-7. **dca 回测起始日语义**(2026-08-09):引擎将 dca 的 `params.start`
+7. **策略精简**(2026-08-09):验证后移除 `ma_cross`/`tsmom`(六策略对照
+   垫底,夏普 0.79/0.68)、`supertrend`(与海龟 ρ=0.86 同源无分散价值)、
+   `rebalance`(B&H 基准结论已沉淀)、`cadence`(降频全面变差,实验完成)
+   ——实现与测试从仓库删除(git 历史可找回),本档案保留全部结论表。
+   配置精简为每族最优 6 份:combo_turtle_xsmom_x2(跟踪)、dca_cn_ndx_gold
+   (跟踪)、turtle_s1_etf_hybrid26(最优单策略池)、xsmom_etf_h26、
+   donchian_etf(S2 基准+快照锚)、livermore_etf(低换手互补);v3 选样
+   系列配置可由 scripts/select_universe_v3.py 重新生成。
+8. **dca 回测起始日语义**(2026-08-09):引擎将 dca 的 `params.start`
    覆盖为回测窗口首日(meta 留痕生效值)——回测问"该计划在这段历史上
    表现如何";配置 start 只锚定影子/实盘真实计划(必须写死,滚动窗口下
    才可复现)。此前配置 start 在窗口末尾会因 T+1 落空导致回测永远无成交。

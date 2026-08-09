@@ -173,10 +173,11 @@ def test_no_lookahead():
 
 
 def test_strategy_yaml():
-    cfg = load_strategy(ROOT / "config" / "strategies" / "turtle_s1_etf.yaml")
-    assert (cfg.name, cfg.strategy, cfg.sec_type) == ("turtle_s1_etf", "turtle_s1", "etf")
-    assert cfg.universe == ["510300", "510500", "159915", "512880",
-                            "518880", "513100", "511010"]
+    # 2026-08-09 策略精简后保留的最优池配置(原 7-ETF 版 turtle_s1_etf 已删除)
+    cfg = load_strategy(ROOT / "config" / "strategies" / "turtle_s1_etf_hybrid26.yaml")
+    assert (cfg.name, cfg.strategy, cfg.sec_type) == (
+        "turtle_s1_etf_hybrid26", "turtle_s1", "etf")
+    assert len(cfg.universe) == 26
     assert cfg.params == {"n_entry": 20, "n_exit": 10, "n_failsafe": 55,
-                          "atr_n": 20, "stop_n_mult": 2.0, "x_risk": 0.00625,
-                          "cap": 0.143, "use_filter": True}
+                          "atr_n": 20, "stop_n_mult": 2.0, "x_risk": 0.004375,
+                          "cap": 0.10, "use_filter": True}
