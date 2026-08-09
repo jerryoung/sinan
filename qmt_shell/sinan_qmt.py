@@ -42,6 +42,9 @@ from datetime import datetime
 SHARE_DIR = r"D:\sinan\var\runtime"
 
 # ---- 以下全部可保持缺省 --------------------------------------------------
+# 只服务指定策略(策略ID = 司南策略配置的 name,面板右上可一键复制);
+# 空 = 执行共享目录里发现的当日全部策略 targets
+STRATEGIES = []
 TRADE_MODE = "auto"          # "sim"/"real" 人工声明;"auto" 尽力探测,失败 unknown
 LOT = 100                    # ETF/股票一手;可转债改 10
 MAX_AGE_HOURS = 8.0          # targets 时效
@@ -142,6 +145,9 @@ def _load_today_targets(now):
             gen = datetime.fromisoformat(p["generated_at"])
             if (now - gen).total_seconds() > MAX_AGE_HOURS * 3600:
                 raise ValueError("超出时效: %s" % p["generated_at"])
+            if STRATEGIES and p.get("strategy") not in STRATEGIES:
+                print("[sinan] 跳过 %s: 不在本壳 STRATEGIES 服务列表" % name)
+                continue
             out.append(p)
         except Exception as e:                 # noqa: BLE001
             print("[sinan] 跳过 %s: %s" % (name, e))

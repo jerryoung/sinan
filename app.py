@@ -54,7 +54,12 @@ if getattr(pg, "url_path", "").strip("/") in _QUANT_PAGES:
         sel_g = st.selectbox("当前策略(全局)", cfgs, index=default_ix,
                              format_func=cfg_label, key="global_cfg")
         st.session_state["_sel_path"] = sel_g
-        st.caption(f"配置文件:{sel_g.name}")
+        import yaml as _yaml
+        _sid = (_yaml.safe_load(sel_g.read_text(encoding="utf-8"))
+                or {}).get("name", sel_g.stem)
+        st.code(_sid, language=None)      # 策略ID,悬停右侧图标一键复制
+        st.caption("策略ID(QMT 脚本 STRATEGIES / 下单备注同此)· "
+                   f"配置文件 {sel_g.name}")
 else:
     st.title("🧭 司南 · 量化平台")
 
