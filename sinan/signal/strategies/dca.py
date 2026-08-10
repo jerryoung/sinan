@@ -53,7 +53,7 @@ def _multiplier(dip_rule: str, ratio: float) -> float:
     return 1.0
 
 
-@register("dca")
+@register("dca", window_anchored_params=("start",))
 def dca(
     ctx: SignalContext,
     *,

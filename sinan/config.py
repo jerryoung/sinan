@@ -9,8 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+import copy
+
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # 项目根 = trend/(本文件在 trend/trend/config.py)
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +41,27 @@ class RiskCfg(BaseModel):
     max_positions: int = 0        # 同时持仓数上限;0 = 不限(海龟 12-unit 之组合版)
 
 
+class LiveCfg(BaseModel):
+    """实盘设置(系统级缺省)。
+
+    engine: 默认实盘引擎。当前仅 qmt(QMT 薄壳文件桥接);字段本身是
+        扩展缝——未来接入其他券商/柜台时在此登记并按值派发。
+    qmt: 全局 QMT 执行配置,与策略级 StrategyCfg.qmt 同构(account/algo)。
+        sinan 不解释其语义、额外键原样透传薄壳,但 algo 的三个约定键要做
+        类型校验(见 check_qmt)——坏值留到 14:45 才炸会瘫痪当日全部策略。
+        策略未配置 qmt 时整体生效;策略配置了则整体让位,见 resolve_qmt。
+    """
+    engine: Literal["qmt"] = "qmt"
+    qmt: dict = Field(default_factory=dict)
+
+    @field_validator("qmt", mode="before")
+    @classmethod
+    def _none_as_empty(cls, v):
+        # YAML 里写 `qmt:`(无值)解析为 None:按"未配置"处理而不是崩掉加载,
+        # 否则一个手滑的空行会让 run_signal/nightly/面板全线不可用
+        return {} if v is None else v
+
+
 class Settings(BaseModel):
     # 名义本金:影子模式出参考委托单、回测默认初始资金用;实盘接入 QMT 后
     # 以 fills 回报的 total_asset 为准,此值仅作无回报时的兜底
@@ -51,6 +74,13 @@ class Settings(BaseModel):
     # 远端 QMT rpc_server 连接参数(host/port/timeout,非机密);
     # token 存 ~/.qmt_rpc_token(机密,严禁入库),qmt_sdk.connect_from_settings 读取
     qmt_rpc: dict = Field(default_factory=dict)
+    live: LiveCfg = Field(default_factory=LiveCfg)
+
+    @field_validator("live", mode="before")
+    @classmethod
+    def _live_none_as_default(cls, v):
+        return {} if v is None else v
+
     execution: ExecutionCfg = Field(default_factory=ExecutionCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)
 
@@ -81,11 +111,69 @@ class StrategyCfg(BaseModel):
     rebalance_band: float | None = None
     # QMT 执行配置(可选):原样嵌入 targets payload 的 "qmt" 字段供薄壳读取,
     # sinan 不解释其内容——每个策略可绑定不同账号与下单算法。约定键:
-    #   account: 资金账号(留空用薄壳常量)
+    #   account: 资金账号(当前薄壳按 QMT 绑定账号下单,此键仅随 targets
+    #            留痕,多账号扩展预留;推荐留空)
     #   algo: {quote_mode: latest|limit, price_offset: 0.002,
     #          max_order_qty: 10000}  # 报价方式/限价偏移/单笔拆单上限
+    # None = 用全局 settings.live.qmt;配置了则整体覆盖全局(见 resolve_qmt)
     qmt: dict | None = None
     params: dict = Field(default_factory=dict)
+
+
+# algo 的三个约定键与其类型转换器;额外键不校验、原样透传薄壳
+_ALGO_TYPES = {"quote_mode": str, "price_offset": float, "max_order_qty": int}
+_QUOTE_MODES = ("latest", "limit")
+
+
+def check_qmt(qmt: dict, *, source: str) -> None:
+    """对 qmt.algo 的约定键做宽校验,坏值在出 targets 时就拒绝。
+
+    "sinan 不解释 qmt 内容"是指不干预语义(额外键照单全收),不等于放任
+    类型错误穿透:薄壳 do_rebalance 对 float(price_offset) 无逐策略兜底,
+    一个 "0.2%" 会让 14:45 当日**全部**策略的调仓中断。宁可现在拒绝生成,
+    也不要空仓之外的意外——与 targets 时效校验同一条原则。
+    """
+    algo = qmt.get("algo")
+    if algo is None:
+        return
+    if not isinstance(algo, dict):
+        raise ValueError(f"{source} 的 qmt.algo 必须是字典,得到 {type(algo).__name__}")
+    for key, caster in _ALGO_TYPES.items():
+        if key not in algo:
+            continue
+        try:
+            caster(algo[key])
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"{source} 的 qmt.algo.{key} 无法解析为 {caster.__name__}: "
+                f"{algo[key]!r}") from e
+    mode = algo.get("quote_mode")
+    if mode is not None and str(mode) not in _QUOTE_MODES:
+        raise ValueError(
+            f"{source} 的 qmt.algo.quote_mode 未知取值 {mode!r},"
+            f"可选 {'/'.join(_QUOTE_MODES)}(薄壳会静默落回市价单)")
+
+
+def resolve_qmt(settings: Settings, cfg: StrategyCfg) -> dict | None:
+    """QMT 执行配置解析:策略级整体覆盖全局(不做键级合并)。
+
+    策略 YAML 配了非空 qmt → 用策略的——不与全局拼接,避免"账号来自
+    全局、算法来自策略"的隐式组合在下单场景造成误判;未配置(None)或
+    显式空 dict → 用全局 settings.live.qmt(系统设置·实盘设置);
+    两者皆空 → None,targets 不写 qmt 字段,薄壳退回其内置缺省
+    (运行环境账号 + ALGO_DEFAULT)。
+
+    注:`qmt: {}` 与不写该键等价(都表示"没有策略级配置"),策略没有
+    "屏蔽全局、强制用薄壳缺省"这一档——需要时把全局配置清空即可。
+    返回深拷贝:调用方对结果(含嵌套 algo)的任何改动都不回写配置对象。
+    """
+    if cfg.qmt:
+        check_qmt(cfg.qmt, source=f"策略 {cfg.name}")
+        return copy.deepcopy(cfg.qmt)
+    if settings.live.qmt:
+        check_qmt(settings.live.qmt, source="全局实盘设置 live.qmt")
+        return copy.deepcopy(settings.live.qmt)
+    return None
 
 
 def _load_yaml(path: Path) -> dict:

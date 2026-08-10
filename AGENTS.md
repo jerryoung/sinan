@@ -18,7 +18,7 @@ Claude Code 经 CLAUDE.md 的 @AGENTS.md 导入。
 无构建系统、无 lint 配置。依赖:`pip install pandas numpy duckdb pyarrow pydantic pyyaml loguru pytest streamlit plotly akshare`
 
 ```bash
-python3 -m pytest tests/ -q                          # 全量测试(194 个)
+python3 -m pytest tests/ -q                          # 全量测试(212 个)
 python3 -m pytest tests/test_engine.py -q            # 单文件
 python3 -m pytest tests/test_dca.py::test_strategy_yaml -q   # 单测试
 
@@ -41,26 +41,39 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   StrategyCfg,相对路径锚定项目根)、`calendar.py`、`universe/instruments.py`、
   `signal/base.py`(SignalContext + `@register` 策略注册表)、`data/store.py`、
   `backtest/result.py`。
-- **策略调用约定**:引擎与 `run_signal` 都必须 `fn(ctx, **cfg.params, lookback=cfg.lookback)`
-  ——漏传 lookback 会造成回测/实盘静默分叉(修过一次)。策略内部只能用 ≤ today
-  的数据(无未来函数),执行一律 T+1。
+- **策略调用约定**:一律走 `signal/base.py` 的 `call_strategy(cfg, ctx)`,**不要**
+  在调用方手写 `fn(ctx, **params, lookback=...)`——漏传 lookback 会造成回测/实盘
+  静默分叉(修过一次;现由约定的唯一实现兜住)。回测传 `window_start=窗口首日`,
+  实盘不传。策略内部只能用 ≤ today 的数据(无未来函数),执行一律 T+1。
+- **ctx 可见列**:`SignalContext` 在 `__init__` 里把每个 DataFrame 裁到
+  `SIG_COLS`(后复权 OHLCV),执行细节列(close_raw/adj_factor/涨跌停价…)
+  拿不到——与 `bars()` 的日期截断同级的物理保证,回测与实盘列集恒等。
+  缺列容忍(新浪源无 amount),已是标准列集则原样透传不复制。
 - **引擎会计口径**(engine.py docstring 有推导,快照测试锁定):持仓记复权股数
   q_eff,成交按原始价整手,估值按后复权收盘,分红=红利再投;先卖后买、现金不透支、
   涨跌停/停牌/强赎全模拟。改口径必须重新生成 `tests/fixtures/snapshot_nav.csv`
   并说明原因。
 - **targets/fills 契约**:`targets_{策略名}_{YYYYMMDD}.json`(`date`=执行日、
-  `data_cutoff`=T−1;checksum 只覆盖权重;`qmt` 字段原样透传策略级账号/下单算法;
+  `data_cutoff`=T−1;checksum 只覆盖权重;`qmt` 字段透传下单算法(来源见下方
+  配置解析优先级;其中 `account` 当前薄壳不读,仅留痕、为多账号扩展预留);
   `ref_orders` 仅供参考);薄壳回写 `fills_{策略名}_{YYYYMMDD}.json`(含
   trade_mode=sim/real 由 QMT 侧上报、total_asset、positions、fills)——
   看板与 run_signal 的持仓真相来源。qmt_shell 的 checksum 算法与
   `sinan/live/targets.py` 两侧各持一份拷贝,必须逐字节一致。策略净值统一由
   `sinan/live/ledger.py` 派生(有 fills 用账户真值,否则 targets 影子重放)。
 - **风险层级**:策略参数 cap/x_risk → 引擎 Σ≤1 + `max_positions`(与 live 共用
-  `limit_positions`:已持仓优先)→ live `apply_risk` 多重裁剪 → 单标的 34% 兜底。
+  `sinan/risk.py` 的 `limit_positions`:已持仓优先)→ live `apply_risk` 多重裁剪
+  → 单标的 34% 兜底。共享风险原语放中立的 `sinan/risk.py`,**研究层不依赖实盘层**。
 - **配置解析优先级**:capital 为 CLI `--total-asset` > 策略 YAML > settings.capital;
-  `rebalance_band` 策略级覆盖全局(定投小增量需 0.005 < 默认 0.02)。
-- **特例语义**:dca 的 `params.start` 在回测中被引擎覆盖为窗口首日(配置值只锚定
-  影子/实盘计划);xsmom 逐日定仓,是"入场时刻锁定权重"约定的唯一例外。
+  `rebalance_band` 策略级覆盖全局(定投小增量需 0.005 < 默认 0.02);
+  `qmt` 执行配置为策略级**整体覆盖**全局 `live.qmt`(resolve_qmt,不做键级
+  合并;策略 `qmt: {}` 等同未配置),两者皆空则 targets 不写 qmt 字段(薄壳
+  用绑定账号 + 内置缺省算法)。resolve 阶段用 `check_qmt` 对 algo 三个约定键
+  做类型/枚举宽校验——坏值留到 14:45 才炸会中断当日**全部**策略的调仓。
+- **特例语义**:dca 的 `params.start` 在回测中改用窗口首日(配置值只锚定影子/
+  实盘计划)——由策略在 `@register("dca", window_anchored_params=("start",))`
+  **自声明**,`call_strategy` 统一改写,引擎不认识任何具体策略名;xsmom 逐日
+  定仓,是"入场时刻锁定权重"约定的唯一例外。
 - **面板只做编排与展示**,不含策略/引擎逻辑:app.py 是 st.navigation 路由入口
   (左侧分组:量化策略/数据中心),页面在 ui/ 包、共享层 ui/common.py;
   回测页遵循"一次回测=一份报告"(HTML 归档 + .cfg.yaml 快照 + .result.json

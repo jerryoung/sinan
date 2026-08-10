@@ -8,6 +8,11 @@ reports_dir: var/reports          # 回测 HTML 报告
 
 wecom_webhook: ""             # 企业微信群机器人 webhook,空则只写本地日志
 
+live:                         # 实盘设置(系统级缺省)
+  engine: qmt                 # 默认实盘引擎(当前仅 qmt = QMT 薄壳文件桥接)
+  qmt: {}                     # 全局 QMT 执行配置(account/algo),策略级 qmt 整体覆盖;
+                              # {} = targets 不写 qmt 字段,薄壳用绑定账号 + 内置缺省算法
+
 execution:
   price_mode: close           # 回测执行价:close(与实盘 14:45 执行近似对齐)| open
   rebalance_band: 0.02        # |目标−当前| 权重差小于此值不调仓,抑制漂移磨损

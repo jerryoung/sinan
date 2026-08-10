@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..risk import limit_positions   # 与回测引擎共用的持仓数上限实现
+
 _EPS = 1e-12   # 浮点比较容差:等比缩放后 Σw 会带 1e-17 级噪声,不应误触发风控
 
 
@@ -50,30 +52,6 @@ def params_fingerprint_of(params: dict) -> str:
 # --------------------------------------------------------------------------
 # 执行层强制风控(§8.3):不信任信号层
 # --------------------------------------------------------------------------
-def limit_positions(targets: dict, current: dict, max_n: int) -> tuple[dict, list[str]]:
-    """
-    持仓数上限(原版海龟 12-unit 总限的组合版)。目标权重 > 0 的标的数
-    超过 max_n 时:**已持仓者优先保留**(不因新信号权重更大而被挤出,
-    避免无谓换手),空余名额按目标权重降序分给新入场者;并列按代码升序,
-    裁剪确定性。被裁标的目标置 0。max_n <= 0 不限。
-    回测引擎与实盘 apply_risk 调用同一实现 —— 回测–实盘一致性(§9)。
-    """
-    pos = {s: w for s, w in targets.items() if w > 0}
-    if max_n <= 0 or len(pos) <= max_n:
-        return dict(targets), []
-    held = sorted((s for s in pos if current.get(s, 0.0) > 0),
-                  key=lambda s: (-pos[s], s))
-    new = sorted((s for s in pos if current.get(s, 0.0) <= 0),
-                 key=lambda s: (-pos[s], s))
-    keep = set((held + new)[:max_n])
-    out, msgs = dict(targets), []
-    for s in sorted(pos):
-        if s not in keep:
-            msgs.append(f"持仓数上限: {s} {pos[s]:.4f}→0 (max_positions={max_n})")
-            out[s] = 0.0
-    return out, msgs
-
-
 def apply_risk(
     weights: dict,
     *,

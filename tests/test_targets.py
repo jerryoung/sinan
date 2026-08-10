@@ -258,9 +258,9 @@ def test_notify_webhook_error_swallowed(monkeypatch):
     notify("x", webhook="https://qyapi.weixin.qq.com/hook")   # 异常吞掉只记日志
 
 
-# ---------------------------------------------------------------- 持仓数上限
+# ------------------------------------------------ 持仓数上限(sinan.risk)
 def test_limit_positions_noop_under_limit():
-    from sinan.live.targets import limit_positions
+    from sinan.risk import limit_positions
     tgt = {"A": 0.1, "B": 0.2}
     out, msgs = limit_positions(tgt, {}, 2)
     assert out == tgt and msgs == []
@@ -270,7 +270,7 @@ def test_limit_positions_noop_under_limit():
 
 def test_limit_positions_blocks_new_entrant():
     """已持仓优先:新信号权重再大也不挤出持仓,超额新入场被裁 0。"""
-    from sinan.live.targets import limit_positions
+    from sinan.risk import limit_positions
     out, msgs = limit_positions({"A": 0.05, "C": 0.50}, {"A": 0.05}, 1)
     assert out["A"] == 0.05 and out["C"] == 0.0
     assert any("C" in m for m in msgs)
@@ -278,7 +278,7 @@ def test_limit_positions_blocks_new_entrant():
 
 def test_limit_positions_trims_overheld():
     """持仓本身超限(如调低上限后):按权重保留前 max_n,其余裁 0。"""
-    from sinan.live.targets import limit_positions
+    from sinan.risk import limit_positions
     cur = {"A": 0.1, "B": 0.1, "C": 0.1}
     out, _ = limit_positions({"A": 0.30, "B": 0.10, "C": 0.20}, cur, 2)
     assert out["A"] == 0.30 and out["C"] == 0.20 and out["B"] == 0.0

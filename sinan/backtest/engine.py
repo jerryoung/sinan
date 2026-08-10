@@ -21,7 +21,7 @@
 3. 收盘结算:equity = cash + Σ q_eff × 后复权收盘(停牌 ffill),
    记录 nav 与实际持仓权重。
 4. 构造 SignalContext(today=t,数据在接口层物理截断到 t 收盘,无未来函数)
-   → get_strategy(cfg.strategy)(ctx, **cfg.params, lookback=cfg.lookback)
+   → call_strategy(cfg, ctx, window_start=窗口首日)(调用约定的唯一实现)
    → 目标权重(负数截 0;Σ>1 等比缩到 1)
    → 与当前权重比较,|Δw| < settings.execution.rebalance_band 的标的跳过
    → 生成 t+1 委托。已触发强制事件的标的不再接受买单(防止强平后回补)。
@@ -58,8 +58,9 @@ import numpy as np
 import pandas as pd
 
 from ..config import Settings, StrategyCfg, load_rules
-from ..live.targets import limit_positions
-from ..signal.base import SignalContext, get_strategy
+from ..risk import limit_positions
+from ..signal.base import (SIG_COLS, SignalContext, call_strategy,
+                           resolve_params)
 from ..universe.cb_terms import EVT_LAST_TRADE_DAY, build_cb_terms
 from ..universe.instruments import resolve_rule
 from .costs import trade_cost
@@ -68,9 +69,8 @@ from .result import TRADE_COLS, BacktestResult
 
 _EPS = 1e-9
 
-#: 信号层可见列 —— 只暴露后复权 OHLCV,执行细节列(raw/limit)不进 ctx,
-#: 防止策略误用不复权口径造成回测–实盘偏差。
-_SIG_COLS = ["open", "high", "low", "close", "volume", "amount"]
+#: 可见列裁剪由 SignalContext 兜底(signal/base.SIG_COLS);这里先裁一次,
+#: 让逐日重建 ctx 走 _sig_frame 的快路径,不做每日复制。
 
 
 @dataclass
@@ -129,7 +129,7 @@ def run_backtest(
         str(sym): prepare_market(g, rules[str(sym)])
         for sym, g in bars.groupby("symbol") if str(sym) in rules
     }
-    sig_data = {s: m[_SIG_COLS] for s, m in mkt.items()}
+    sig_data = {s: m[SIG_COLS] for s, m in mkt.items()}
 
     # ---- 转债条款与强赎末日 ---------------------------------------------
     events_df = store.read_cb_events(universe)
@@ -157,13 +157,9 @@ def run_backtest(
     close_raw_ff = pd.DataFrame({s: m["close_raw"].reindex(days, method="ffill") for s, m in mkt.items()})
     factor_ff = pd.DataFrame({s: m["adj_factor"].reindex(days, method="ffill") for s, m in mkt.items()})
 
-    strategy = get_strategy(strategy_cfg.strategy)
-    params = dict(strategy_cfg.params)
-    # 定投计划起始日以回测窗口起点为准:配置里的 start 锚定影子/实盘的真实
-    # 计划(必须写死,滚动窗口下才可复现),回测问的是"该计划在这段历史上
-    # 表现如何",起点即窗口首日。想复现影子计划,把回测 start 设为计划日即可。
-    if strategy_cfg.strategy == "dca" and "start" in params:
-        params["start"] = str(days[0].date())
+    # 计划锚点参数(如 dca 的 start)由策略自己在 @register 声明,
+    # call_strategy 按窗口首日改写 —— 引擎不认识任何具体策略名。
+    # 想复现影子计划,把回测 start 设为计划日即可。
     price_mode = settings.execution.price_mode
     band = (strategy_cfg.rebalance_band if strategy_cfg.rebalance_band is not None
             else settings.execution.rebalance_band)
@@ -318,8 +314,7 @@ def run_backtest(
         ctx = SignalContext(today=t, data=sig_data, positions=w_row,
                             total_asset=equity, rules=rules, universe=universe,
                             cb_terms=cb_terms)
-        raw_targets = strategy(ctx, **params,
-                               lookback=strategy_cfg.lookback) or {}
+        raw_targets = call_strategy(strategy_cfg, ctx, window_start=days[0])
         tgt: dict[str, float] = {}
         for s, w in raw_targets.items():
             s = str(s)
@@ -366,7 +361,8 @@ def run_backtest(
     meta = {
         "strategy": strategy_cfg.strategy,
         "name": strategy_cfg.name,
-        "params": dict(params),        # 实际生效参数(dca 的 start 已对齐窗口起点)
+        # 实际生效参数(计划锚点参数已对齐窗口起点),与策略实际收到的同源
+        "params": resolve_params(strategy_cfg, window_start=days[0]),
         "lookback": strategy_cfg.lookback,
         "universe": universe,
         "sec_type": strategy_cfg.sec_type,

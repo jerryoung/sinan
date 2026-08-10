@@ -36,13 +36,13 @@ def main() -> int:
 
     import pandas as pd
 
-    from sinan.config import load_rules, load_settings, load_strategy
+    from sinan.config import load_rules, load_settings, load_strategy, resolve_qmt
     from sinan.data.store import DataStore
     from sinan.live.broker import QmtShellBroker
     from sinan.live.notify import notify
     from sinan.live.targets import (apply_risk, build_payload, build_ref_orders,
                                     save_targets)
-    from sinan.signal.base import SignalContext, get_strategy
+    from sinan.signal.base import SignalContext, call_strategy
     from sinan.universe.cb_terms import build_cb_terms
     from sinan.universe.instruments import resolve_rule
 
@@ -86,13 +86,13 @@ def main() -> int:
         total_asset = float(last.get("total_asset") or total_asset)
 
     # 4) 同一个 generate_targets(回测/实盘唯一策略实现)。
-    #    lookback 必须与引擎同源传入(engine 亦为 **params + lookback=cfg.lookback),
-    #    否则改 YAML 时回测与实盘会静默分叉
-    fn = get_strategy(cfg.strategy)
+    #    调用约定(含 lookback 传参)收口在 call_strategy,与引擎同一实现;
+    #    ctx 的可见列由 SignalContext 统一裁到 SIG_COLS,两侧列集一致。
+    #    不传 window_start:实盘用配置里写死的计划锚点(回测才对齐窗口首日)
     ctx = SignalContext(today=today, data=data, positions=positions,
                         total_asset=total_asset, rules=rules,
                         universe=cfg.universe, cb_terms=cb)
-    weights = fn(ctx, **cfg.params, lookback=cfg.lookback)
+    weights = call_strategy(cfg, ctx)
 
     # 5) 执行层强制风控:近 20 日均成交额做流动性截断(amount 单位为元)
     adv20 = {}
@@ -113,8 +113,10 @@ def main() -> int:
     prices = {s: float(df["close_raw"].iloc[-1]) if "close_raw" in df
               else float(df["close"].iloc[-1]) for s, df in data.items()}
     payload["capital"] = total_asset
-    if cfg.qmt:
-        payload["qmt"] = cfg.qmt          # 账号/下单算法原样透传给 QMT 薄壳
+    # 账号/下单算法透传给 QMT 薄壳:策略级 qmt 整体覆盖,缺省用全局实盘设置
+    qmt_cfg = resolve_qmt(settings, cfg)
+    if qmt_cfg:
+        payload["qmt"] = qmt_cfg
     payload["ref_orders"] = build_ref_orders(
         weights, current_weights=positions, capital=total_asset, prices=prices,
         lot_sizes={s: r.lot_size for s, r in rules.items()},

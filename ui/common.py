@@ -151,6 +151,25 @@ STRAT_ENUMS = {
 }
 
 
+def enum_ix(opts: list, value, default) -> int:
+    """枚举下拉的防御式索引:文件里的自由值不在选项内时回落缺省。
+
+    配置里的枚举字段(尤其 qmt 这类"原样透传"的自由 dict)可能被高级 YAML
+    模式写成任意值;直接 opts.index(未知值) 会抛 ValueError,而按仓库已知坑
+    "Streamlit 一处异常整页崩",整个配置页会因此打不开。
+    """
+    v = value if value is not None else default
+    return opts.index(v) if v in opts else opts.index(default)
+
+
+def num_or(value, default, caster):
+    """数值控件取值兜底:None / 非数字文本一律回落缺省,不让整页崩。"""
+    try:
+        return caster(value)
+    except (TypeError, ValueError):
+        return caster(default)
+
+
 def params_grid(strat: str, params: dict, prefix: str) -> dict:
     """一组策略参数的表单格(带 ❓);prefix 保证多策略组合场景下控件 key 唯一。"""
     helps = {**COMMON_HELP, **STRAT_HELP.get(strat, {})}
@@ -214,6 +233,46 @@ def render_param_form(d: dict, prefix: str) -> dict:
     out["universe"] = [s.strip().strip('"') for s in uni_text.replace(",", " ").split()
                        if s.strip()]
     st.caption(f"当前池 {len(out['universe'])} 只")
+
+    # QMT 实盘执行(策略级覆盖):不启用则 targets 用 设置页·实盘设置 的全局配置
+    has_qmt = bool(d.get("qmt"))
+    with st.expander("QMT 实盘执行(策略级覆盖,可选)", expanded=has_qmt):
+        use_qmt = st.checkbox(
+            "启用策略级覆盖(整体替代全局实盘设置,不做键级合并)",
+            value=has_qmt, key=f"pf_{prefix}_qmt_on",
+            help="不勾选 = targets 使用 设置页·实盘设置 的全局 QMT 配置(或薄壳缺省)")
+        if use_qmt:
+            q = dict(d.get("qmt") or {})
+            a = dict(q.get("algo") or {})
+            qc1, qc2, qc3, qc4 = st.columns(4)
+            acct = qc1.text_input(
+                "account(空=QMT 绑定账号)", q.get("account", ""),
+                key=f"pf_{prefix}_qmt_acct",
+                help="资金账号;当前薄壳按 QMT 绑定账号下单,此字段仅随 "
+                     "targets 留痕(多账号扩展预留),推荐留空")
+            qm_opts = ["latest", "limit"]
+            a["quote_mode"] = qc2.selectbox(
+                "algo.quote_mode", qm_opts,
+                index=enum_ix(qm_opts, a.get("quote_mode"), "latest"),
+                key=f"pf_{prefix}_qmt_qm",
+                help="latest=最新价市价单;limit=限价单(带偏移)")
+            a["price_offset"] = float(qc3.number_input(
+                "algo.price_offset", value=num_or(a.get("price_offset"), 0.002, float),
+                step=0.001, format="%.3f", key=f"pf_{prefix}_qmt_po",
+                help="限价单相对最新价的让价比例:买挂高、卖挂低"))
+            a["max_order_qty"] = int(qc4.number_input(
+                "algo.max_order_qty", value=num_or(a.get("max_order_qty"), 10000, int),
+                step=1000, key=f"pf_{prefix}_qmt_mq", help="单笔拆单上限(股)"))
+            st.caption("注:保存即把上述算法参数固化进策略 YAML——原本"
+                       "『algo 留空、跟随薄壳缺省』的语义会被替换为本地快照。")
+            if acct.strip():
+                q["account"] = acct.strip()
+            else:
+                q.pop("account", None)
+            q["algo"] = a
+            out["qmt"] = q
+        else:
+            out.pop("qmt", None)
 
     params = dict(d.get("params", {}))
     if strat == "combo":

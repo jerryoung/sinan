@@ -16,6 +16,11 @@ params.legs 形如:
         weight: 0.5
         params: {mom_n: 244, ..., lookback: 750}
 
+已知边界:腿是 dict 而非 StrategyCfg,不走 call_strategy,因此腿策略的
+window_anchored_params(如 dca 的 start)在回测中**不会**被改写为窗口首日
+——与重构前的引擎特例行为一致(彼时也只判顶层策略名)。当前无配置把
+定投类策略作为腿使用;若要支持,应让腿也走 call_strategy。
+
 约定:腿 params 里可自带 lookback(缺省用组合层 lookback);
 腿策略自身已处理强赎守卫与自身 Σ>1 缩放,组合层最后再做一次
 全局 Σ>1 等比缩(两级缩放语义:先腿内、后组合,均只缩不放)。
