@@ -33,7 +33,7 @@ python3 scripts/shadow_update.py --strategy config/strategies/combo_turtle_xsmom
 # 4) 操作面板(影子模式 / 策略配置 / 回测 / 数据查询)
 streamlit run app.py
 
-# 测试(212 个,含回测快照与事件追踪测试)
+# 测试(231 个,含回测快照与事件追踪测试)
 python3 -m pytest tests/ -q
 ```
 
@@ -131,6 +131,8 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 - 不处理停牌流水(缺 K 线视同停牌顺延);止损按收盘价触发;仅做多;
   组合无资金动态再平衡。
 - 影子模式的"每日信号 vs 回测同期输出"自动比对(M3)未实现,机件已齐备。
+- 对账仅告警不阻断:账实不符会在看板与推送里显眼提示,但不会自动停掉
+  次日执行(是否升级为硬阻断是风控决定,见 sinan/live/reconcile.py)。
 - 数据源:sina 主用(未复权增量+质检门),tushare 待恢复权限,
   baostock/yahoo 实测不合格(详见档案)。
 

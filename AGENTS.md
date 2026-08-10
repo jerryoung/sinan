@@ -18,7 +18,7 @@ Claude Code 经 CLAUDE.md 的 @AGENTS.md 导入。
 无构建系统、无 lint 配置。依赖:`pip install pandas numpy duckdb pyarrow pydantic pyyaml loguru pytest streamlit plotly akshare`
 
 ```bash
-python3 -m pytest tests/ -q                          # 全量测试(212 个)
+python3 -m pytest tests/ -q                          # 全量测试(231 个)
 python3 -m pytest tests/test_engine.py -q            # 单文件
 python3 -m pytest tests/test_dca.py::test_strategy_yaml -q   # 单测试
 
@@ -58,8 +58,12 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   配置解析优先级;其中 `account` 当前薄壳不读,仅留痕、为多账号扩展预留);
   `ref_orders` 仅供参考);薄壳回写 `fills_{策略名}_{YYYYMMDD}.json`(含
   trade_mode=sim/real 由 QMT 侧上报、total_asset、positions、fills)——
-  看板与 run_signal 的持仓真相来源。qmt_shell 的 checksum 算法与
-  `sinan/live/targets.py` 两侧各持一份拷贝,必须逐字节一致。策略净值统一由
+  看板与 run_signal 的持仓真相来源;文件名一律经 `targets.targets_path()`
+  构造,不要再手拼。**对账接线在次日出信号时**:run_signal 用
+  `reconcile_fills` 比对上一执行日的 targets vs fills,结论写进当日 payload
+  的 `reconcile` 字段并在看板展示——仅告警不阻断(权重偏差里混着无害的
+  隔夜价格漂移,容忍度 `risk.reconcile_tolerance` 默认 2pp)。qmt_shell 的
+  checksum 算法与 `sinan/live/targets.py` 两侧各持一份拷贝,必须逐字节一致。策略净值统一由
   `sinan/live/ledger.py` 派生(有 fills 用账户真值,否则 targets 影子重放)。
 - **风险层级**:策略参数 cap/x_risk → 引擎 Σ≤1 + `max_positions`(与 live 共用
   `sinan/risk.py` 的 `limit_positions`:已持仓优先)→ live `apply_risk` 多重裁剪
@@ -86,6 +90,11 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
 - 成本:ETF 单边 5bp、个股 8bp;年化基准 `TRADING_DAYS=244`;蒙特卡洛固定 seed。
 - 数据加载:优先 var/store 缓存,缺失才联网(sina 主用增量,tushare 备源需
   `~/.tushare_token`,token 严禁写入仓库/日志)。
+- **跳变阈值按标的算**,唯一定义在 `data/quality.jump_threshold`(=limit_pct×1.05),
+  增量拉取与日更审计共用:曾硬编码 0.11,会把科创板 ETF(20% 涨跌幅)的合法
+  行情判成坏数据拒绝入库,而影子链路"任一标的失败即中止",当天直接没有信号。
+  `data/ensure.py` 的 0.20-仅告警是**有意的第三种口径**(全量未复权历史里除权
+  跳空是常态),勿"统一"掉。
 - 测试风格:合成序列忌纯横盘(恰贴通道边界会连环触发,基底加微降漂移);策略
   测试用事件追踪(events 列表)断言到具体规则分支,并保住这些断言。
 - Streamlit:所有页签每次 rerun 全部执行,一处异常全页面崩;表单控件 key 已绑定

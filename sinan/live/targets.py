@@ -206,11 +206,17 @@ def build_payload(
     }
 
 
+def targets_path(targets_dir, strategy: str, date) -> Path:
+    """targets 文件路径 —— 文件名契约的唯一定义处(写入/校验/对账共用)。"""
+    ymd = pd.Timestamp(date).strftime("%Y%m%d")
+    return Path(targets_dir) / f"targets_{strategy}_{ymd}.json"
+
+
 def save_targets(payload: dict, targets_dir) -> Path:
     """写 targets_{策略名}_{YYYYMMDD}.json —— 多策略影子跟踪互不覆盖。"""
     d = Path(targets_dir)
     d.mkdir(parents=True, exist_ok=True)
-    fp = d / f"targets_{payload['strategy']}_{payload['date'].replace('-', '')}.json"
+    fp = targets_path(d, payload["strategy"], payload["date"])
     fp.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
                   encoding="utf-8")
     return fp
@@ -224,7 +230,7 @@ def load_and_validate(targets_dir, date, settings, strategy: str) -> dict:
     非当日文件拒绝执行——旧信号在新行情下执行等于随机下单。
     """
     day = pd.Timestamp(date).strftime("%Y-%m-%d")
-    fp = Path(targets_dir) / f"targets_{strategy}_{day.replace('-', '')}.json"
+    fp = targets_path(targets_dir, strategy, date)
     if not fp.exists():
         raise TargetsInvalid(f"targets 文件不存在: {fp}")
 

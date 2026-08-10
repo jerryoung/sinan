@@ -24,3 +24,5 @@ risk:                         # 执行层强制风控(不信任信号层)
   liquidity_pct_adv20: 0.05   # 单笔委托 ≤ 近20日均成交额的 5%
   targets_max_age_hours: 8    # targets 文件时效
   max_positions: 12           # 同时持仓数上限(0=不限);回测引擎与实盘同一语义
+  reconcile_tolerance: 0.02   # 对账容忍度:次日出信号时比对上一执行日的
+                              # targets vs fills,超此权重差告警(仅提示不阻断)

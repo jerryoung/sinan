@@ -106,6 +106,23 @@ def show_targets(fp: Path):
                  "参考价": o["ref_price"], "参考股数": f"{o['qty']:,}",
                  "预估金额": f"{o['est_amount']:,.0f}"} for o in ref]
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    # 上一执行日的对账结论(run_signal 生成时留痕):账实不符必须显眼,
+    # 否则这张安全网等于没有——targets 写出去之后的事只能靠它发现
+    rc = p.get("reconcile") or {}
+    if rc.get("skipped"):
+        st.caption(f"对账:{rc['skipped']}")
+    elif rc.get("deviations"):
+        st.warning(f"⚠️ 上一执行日({rc.get('date', '?')})账实不符:"
+                   f"{len(rc['deviations'])} 只标的超出容忍度——"
+                   "请确认 QMT 薄壳是否正常执行")
+        st.dataframe(pd.DataFrame([
+            {"代码": d["symbol"], "名称": names.get(d["symbol"], ""),
+             "目标": f"{d['target']:.1%}", "实际": f"{d['actual']:.1%}",
+             "偏差": f"{d['diff']:+.1%}"} for d in rc["deviations"]]),
+            width="stretch", hide_index=True)
+    elif rc.get("date"):
+        st.caption(f"对账:上一执行日({rc['date']})账实一致 ✓")
+
     st.caption(f"策略 {p['strategy']} · 参数指纹 {p['params_fingerprint']} · "
                f"生成于 {p['generated_at']} · 校验和 {p['checksum'][:12]}…")
 

@@ -5,6 +5,10 @@
 不入库、原因逐条记录——调用方决定"部分成功继续"(夜间更新)还是
 "有失败即中止"(影子出信号前的严格门)。
 
+跳变阈值取自 data/quality.jump_threshold(按标的的 limit_pct 逐只计算),
+与日更审计同一口径:此处曾硬编码 0.11,会把科创板 ETF(20% 涨跌幅)的
+合法行情判成坏数据拒绝入库,连锁导致影子链路当天出不了信号。
+
 复权因子语义:增量行沿用该标的最后一个因子(缺口期内若有分红会被当作
 真实下跌,跳变检查兜底);全新标的请先走 ensure_bars 全量补数。
 """
@@ -16,7 +20,6 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-JUMP_MAX = 0.11        # 跳变阈值:涨跌幅限制 10% + 容差
 _PAUSE_S = 0.25        # 逐只限速
 
 
@@ -29,8 +32,16 @@ def fetch_incremental(store, symbols, sec_type: str = "etf",
     """
     import akshare as ak
 
+    from ..config import load_rules
+    from .quality import jump_threshold
+
     symbols = [str(s) for s in symbols]
     today = pd.Timestamp.today().normalize()
+    # 逐标的跳变上限(与日更审计同一定义):品种规则决定 10%/20%
+    rules_cfg = load_rules()
+    inst = store.read_instruments(sec_type=sec_type)
+    names = (dict(zip(inst["symbol"].astype(str), inst["name"].astype(str)))
+             if len(inst) and {"symbol", "name"} <= set(inst.columns) else {})
     prev = store.read_bars(symbols=symbols, sec_type=sec_type)
     tail = (prev.sort_values("date").groupby("symbol").tail(1)
             .set_index("symbol") if len(prev) else pd.DataFrame())
@@ -66,9 +77,11 @@ def fetch_incremental(store, symbols, sec_type: str = "etf",
             closes = pd.concat([pd.Series([float(tail.loc[s, "close"])]),
                                 df["close"]], ignore_index=True)
             jump = closes.pct_change().abs().iloc[1:]
-            if (jump > JUMP_MAX).any():
+            jump_max = jump_threshold(s, sec_type, rules_cfg,
+                                      name=names.get(s, ""))
+            if (jump > jump_max).any():
                 d = df["date"].iloc[int(jump.values.argmax())].date()
-                raise ValueError(f"跳变 {jump.max():.1%} 于 {d}(> {JUMP_MAX:.0%})")
+                raise ValueError(f"跳变 {jump.max():.1%} 于 {d}(> {jump_max:.0%})")
             fac = float(tail.loc[s, "adj_factor"]) if "adj_factor" in tail else 1.0
             ok_frames.append(df.assign(symbol=s, adj_factor=fac, amount=np.nan)[
                 ["symbol", "date", "open", "high", "low", "close",

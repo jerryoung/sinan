@@ -40,6 +40,7 @@ def main() -> int:
     from sinan.data.store import DataStore
     from sinan.live.broker import QmtShellBroker
     from sinan.live.notify import notify
+    from sinan.live.reconcile import reconcile_fills
     from sinan.live.targets import (apply_risk, build_payload, build_ref_orders,
                                     save_targets)
     from sinan.signal.base import SignalContext, call_strategy
@@ -85,6 +86,20 @@ def main() -> int:
         positions = {s: float(w) for s, w in (last.get("weights") or {}).items()}
         total_asset = float(last.get("total_asset") or total_asset)
 
+    # 3.5) 对账:上一执行日的 targets vs 其 fills —— 文件桥接模式的安全网。
+    # 在这里做而不是另起 15:10 定时任务:今天该不该照常下单,取决于上一次
+    # 到底执行成没成。仅告警不阻断(价格漂移也会造成权重偏差,见 reconcile)
+    recon = reconcile_fills(last, settings.targets_dir, strategy=cfg.name,
+                            tolerance=settings.risk.reconcile_tolerance,
+                            notify_fn=lambda m, **kw: notify_fn(m, level="warning"))
+    if recon.skipped:
+        print(f"对账跳过:{recon.skipped}")
+    elif recon.ok:
+        print(f"对账通过:{recon.date} 账实一致"
+              f"(容忍度 {settings.risk.reconcile_tolerance:.1%})")
+    else:
+        print(f"对账不符:{recon.date} {len(recon.deviations)} 只标的超容忍度")
+
     # 4) 同一个 generate_targets(回测/实盘唯一策略实现)。
     #    调用约定(含 lookback 传参)收口在 call_strategy,与引擎同一实现;
     #    ctx 的可见列由 SignalContext 统一裁到 SIG_COLS,两侧列集一致。
@@ -113,6 +128,7 @@ def main() -> int:
     prices = {s: float(df["close_raw"].iloc[-1]) if "close_raw" in df
               else float(df["close"].iloc[-1]) for s, df in data.items()}
     payload["capital"] = total_asset
+    payload["reconcile"] = recon.as_dict()   # 上一执行日的对账结论,随当日决策留痕
     # 账号/下单算法透传给 QMT 薄壳:策略级 qmt 整体覆盖,缺省用全局实盘设置
     qmt_cfg = resolve_qmt(settings, cfg)
     if qmt_cfg:

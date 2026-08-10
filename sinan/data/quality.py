@@ -32,6 +32,23 @@ from ..universe.instruments import resolve_rule
 JUMP_TOL = 1.05
 
 
+def jump_threshold(symbol: str, sec_type: str, rules_cfg: dict | None = None,
+                   *, name: str = "") -> float:
+    """该标的的单日跳变上限 = limit_pct × JUMP_TOL —— "什么算坏 K 线"的唯一定义。
+
+    拉取侧(入库前逐标的把关)与本模块的日更审计(入库后全量体检)共用同一
+    阈值:同一条业务规则不该有两份实现。**必须逐标的算**,不能用一个全局
+    常数——科创板 ETF(588/589)涨跌幅是 20%,拿 10% 的阈值去卡会把合法
+    行情判成坏数据、拒绝入库,当天直接出不了信号。
+
+    注:全量历史补数(data/ensure.py)另有一套更宽的"仅告警"策略,那是
+    有意为之的第三种口径——未复权历史里的分红除权本就是合法跳变,详见其
+    模块 docstring;不要"统一"掉它。
+    """
+    rules_cfg = rules_cfg if rules_cfg is not None else load_rules()
+    return resolve_rule(str(symbol), sec_type, rules_cfg, name=name).limit_pct * JUMP_TOL
+
+
 @dataclass(frozen=True)
 class Issue:
     symbol: str

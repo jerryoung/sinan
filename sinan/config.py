@@ -39,6 +39,10 @@ class RiskCfg(BaseModel):
     liquidity_pct_adv20: float = 0.05
     targets_max_age_hours: float = 8.0
     max_positions: int = 0        # 同时持仓数上限;0 = 不限(海龟 12-unit 之组合版)
+    # 对账容忍度(权重绝对差):次日出信号时比对上一执行日的 targets vs fills。
+    # 不能设太紧——T−1 收盘到 T 收盘的价格漂移本身就会造成权重偏差
+    # (20% 的仓位当天涨 5% ≈ 1pp),那不是执行失败。仅告警,不阻断。
+    reconcile_tolerance: float = 0.02
 
 
 class LiveCfg(BaseModel):

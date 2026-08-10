@@ -86,6 +86,13 @@ def page():
         rk["targets_max_age_hours"] = float(r6.number_input(
             "targets 时效(小时)", value=num_or(rk.get("targets_max_age_hours"), _DEF_RISK["targets_max_age_hours"], float),
             step=1.0, format="%.0f", key=f"set_{fkey}_age"))
+        r7, _, _ = st.columns(3)
+        rk["reconcile_tolerance"] = float(r7.number_input(
+            "对账容忍度(权重差)",
+            value=num_or(rk.get("reconcile_tolerance"), _DEF_RISK["reconcile_tolerance"], float),
+            step=0.005, format="%.3f", key=f"set_{fkey}_rt",
+            help="次日出信号时比对上一执行日 targets vs fills;超此偏差告警"
+                 "(仅提示不阻断)。别设太紧:价格漂移本身就会造成权重偏差"))
         out["risk"] = rk
 
         st.markdown("**实盘设置(live)**")
