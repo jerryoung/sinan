@@ -70,6 +70,21 @@ def test_all_repo_strategies_explicitly_reference_existing_profile():
 def test_settings_no_longer_has_inline_live_qmt():
     assert "live" not in Settings.model_fields
     assert "qmt_rpc" in Settings.model_fields
+    with pytest.raises(ValidationError, match="live"):
+        Settings(live={"engine": "qmt", "qmt": {}})
+
+
+def test_repo_settings_has_no_legacy_live_section_and_keeps_qmt_rpc():
+    raw = yaml.safe_load((ROOT / "config" / "settings.yaml").read_text(encoding="utf-8"))
+    assert "live" not in raw
+    assert "qmt_rpc" in raw
+
+
+def test_production_entrypoints_do_not_use_legacy_qmt_resolver():
+    for relative in ("scripts/run_signal.py", "ui/common.py", "ui/settings_page.py"):
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        assert "resolve_qmt" not in source, relative
+        assert "Settings.live" not in source, relative
 
 
 def test_strategy_defaults_to_local_profile_and_rejects_legacy_qmt():

@@ -18,7 +18,7 @@ Claude Code 经 CLAUDE.md 的 @AGENTS.md 导入。
 无构建系统、无 lint 配置。依赖:`pip install pandas numpy duckdb pyarrow pydantic pyyaml loguru pytest streamlit plotly akshare`
 
 ```bash
-python3 -m pytest tests/ -q                          # 全量测试(239 个)
+python3 -m pytest tests/ -q                          # 全量测试(264 个)
 python3 -m pytest tests/test_engine.py -q            # 单文件
 python3 -m pytest tests/test_dca.py::test_strategy_yaml -q   # 单测试
 
@@ -38,7 +38,7 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
 ```
 
 - **核心契约模块**(全线被 import,改签名全局波及):`sinan/config.py`(Settings/
-  StrategyCfg,相对路径锚定项目根)、`calendar.py`、`universe/instruments.py`、
+  StrategyCfg/LiveProfilesCfg,相对路径锚定项目根)、`calendar.py`、`universe/instruments.py`、
   `signal/base.py`(SignalContext + `@register` 策略注册表)、`data/store.py`、
   `backtest/result.py`。
 - **策略调用约定**:一律走 `signal/base.py` 的 `call_strategy(cfg, ctx)`,**不要**
@@ -54,8 +54,9 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   涨跌停/停牌/强赎全模拟。改口径必须重新生成 `tests/fixtures/snapshot_nav.csv`
   并说明原因。
 - **targets/fills 契约**:`targets_{策略名}_{YYYYMMDD}.json`(`date`=执行日、
-  `data_cutoff`=T−1;checksum 只覆盖权重;`qmt` 字段透传下单算法(来源见下方
-  配置解析优先级;其中 `account` 当前薄壳不读,仅留痕、为多账号扩展预留);
+  `data_cutoff`=T−1;checksum 只覆盖权重;`live_profile` 记录命名实盘配置 ID,
+  `qmt` 字段是该配置解析出的薄壳兼容参数(`account` 当前薄壳不读,仅留痕、
+  为多账号扩展预留);
   `ref_orders` 仅供参考);薄壳回写 `fills_{策略名}_{YYYYMMDD}.json`(含
   trade_mode=sim/real 由 QMT 侧上报、total_asset、positions、fills)——
   看板与 run_signal 的持仓真相来源;文件名一律经 `targets.targets_path()`
@@ -69,17 +70,19 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   `sinan/risk.py` 的 `limit_positions`:已持仓优先)→ live `apply_risk` 多重裁剪
   → 单标的 34% 兜底。共享风险原语放中立的 `sinan/risk.py`,**研究层不依赖实盘层**。
 - **配置解析优先级**:capital 为 CLI `--total-asset` > 策略 YAML > settings.capital;
-  `rebalance_band` 策略级覆盖全局(定投小增量需 0.005 < 默认 0.02);
-  `qmt` 执行配置为策略级**整体覆盖**全局 `live.qmt`(resolve_qmt,不做键级
-  合并;策略 `qmt: {}` 等同未配置),两者皆空则 targets 不写 qmt 字段(薄壳
-  用绑定账号 + 内置缺省算法)。resolve 阶段用 `check_qmt` 对 algo 三个约定键
-  做类型/枚举宽校验——坏值留到 14:45 才炸会中断当日**全部**策略的调仓。
+  `rebalance_band` 策略级覆盖全局(定投小增量需 0.005 < 默认 0.02)。实盘参数
+  只有 `config/live_profiles.yaml` 一个事实来源:策略以 `live_profile` 引用 ID,
+  `resolve_live_profile` 解析为 QMT 参数;引用不存在直接拒绝出 targets,**不得**
+  回退默认配置。配置 ID 创建后不可改;默认配置或被策略引用的配置禁止删除。
+  `qmt_rpc` 是系统连接参数,留在 settings.yaml,不属于策略实盘配置。
 - **特例语义**:dca 的 `params.start` 在回测中改用窗口首日(配置值只锚定影子/
   实盘计划)——由策略在 `@register("dca", window_anchored_params=("start",))`
   **自声明**,`call_strategy` 统一改写,引擎不认识任何具体策略名;xsmom 逐日
   定仓,是"入场时刻锁定权重"约定的唯一例外。
 - **面板只做编排与展示**,不含策略/引擎逻辑:app.py 是 st.navigation 路由入口
   (左侧分组:量化策略/数据中心),页面在 ui/ 包、共享层 ui/common.py;
+  设置页分“系统设置/实盘配置”页签,实盘配置 CRUD 在 `ui/live_profiles.py`;
+  策略页只选择配置引用,不允许内联编辑 QMT 参数。
   回测页遵循"一次回测=一份报告"(HTML 归档 + .cfg.yaml 快照 + .result.json
   数据,统一由 show_report 渲染)。
 

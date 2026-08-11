@@ -33,7 +33,7 @@ python3 scripts/shadow_update.py --strategy config/strategies/combo_turtle_xsmom
 # 4) 操作面板(影子模式 / 策略配置 / 回测 / 数据查询)
 streamlit run app.py
 
-# 测试(239 个,含回测快照与事件追踪测试)
+# 测试(264 个,含回测快照与事件追踪测试)
 python3 -m pytest tests/ -q
 ```
 
@@ -47,9 +47,11 @@ sinan/             Python 包(核心代码,与项目同名)
   ├ universe/      交易规则推断(板块/T+0/涨跌幅)· 转债条款与强赎事件
   ├ signal/        SignalContext + 策略注册表 + strategies/(全部策略实现)
   ├ backtest/      engine(逐日循环)· execution_model · costs · report(指标+HTML)
-  ├ live/          targets(风控裁剪/留痕/校验)· broker · reconcile · notify
+  ├ live/          targets(风控裁剪/留痕/校验)· profiles(实盘配置引用/删除保护)
+  │                · broker · reconcile · notify
   └ risk.py        组合层风险原语(limit_positions),回测与实盘共用的中立模块
-config/            settings.yaml(本金/路径/执行/风控)· rules.yaml(品种规则)· strategies/*.yaml
+config/            settings.yaml(本金/路径/执行/风控)· live_profiles.yaml(实盘配置)
+                   · rules.yaml(品种规则)· strategies/*.yaml(含 live_profile 引用)
 scripts/           bootstrap / daily_update / shadow_update / run_signal / run_backtest / 研究脚本
 qmt_shell/         sinan_qmt(ECS 统一脚本,唯一必填 SHARE_DIR:执行全部策略 targets
                    + 备注「策略ID#日期#序号」归因 + 策略虚拟账本 + fills 回写 + RPC
@@ -100,7 +102,8 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 - **复权会计**:持仓记复权股数 q_eff,成交按原始价整手,市值按后复权收盘,
   分红=红利再投;**adj_factor 缺失语义是组内 ffill,永远不是 1.0**(事故记录见档案)。
 - **targets 契约**:`targets_{策略名}_{YYYYMMDD}.json`,多策略互不覆盖;
-  checksum 只覆盖权重契约,`ref_orders` 参考委托区仅供影子/人工执行参考。
+  checksum 只覆盖权重契约,`live_profile` 记录实盘配置 ID,解析后的 `qmt`
+  保持薄壳兼容;`ref_orders` 参考委托区仅供影子/人工执行参考。
 - **策略调用**:引擎与 run_signal 一律走 `call_strategy(cfg, ctx)`(调用约定的
   唯一实现);ctx 可见列由 `SignalContext` 统一裁到后复权 OHLCV,两侧恒等。
   dca 的计划起始日在回测中以回测窗口起点为准(配置 `start` 只锚定影子/实盘),
@@ -116,8 +119,8 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 - **量化策略**:策略看板(影子/实盘统一入口:收益统计、净值曲线、持仓详情、
   交易记录,targets 详情可展开;有 QMT fills 即实盘口径,否则影子重放)·
   回测(一次回测=一份存档报告,配置快照可 diff)· 策略配置(表单/YAML
-  双模式,含策略级 QMT 执行覆盖)· 设置(全局 settings.yaml 界面化编辑,
-  含实盘设置:默认引擎 + 全局 QMT 执行配置,策略未配置 qmt 时生效)
+  双模式,只引用命名实盘配置)· 设置(“系统设置/实盘配置”双页签;实盘配置
+  支持新增、编辑、设为默认和删除,默认或被策略引用时禁止删除并列出策略)
 - **数据中心**:行情查询(标的搜索 + K 线)· 数据仓概况(三品种覆盖/日历/
   标的档案)· 数据更新(增量=全部策略池并集,手动批量同步,夜间 20:00
   cron 自动更新——失败逐条报告标的/时间窗/原因,写 var/runtime/update_log.json)

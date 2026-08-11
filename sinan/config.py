@@ -133,6 +133,8 @@ class DataCfg(BaseModel):
 
 
 class Settings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # 名义本金:影子模式出参考委托单、回测默认初始资金用;实盘接入 QMT 后
     # 以 fills 回报的 total_asset 为准,此值仅作无回报时的兜底
     capital: float = 1_000_000.0
