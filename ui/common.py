@@ -18,8 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 from sinan.config import load_live_profiles, load_settings  # noqa: E402
 
-NAV_COLOR = "#4269D0"
-DD_COLOR = "#C4433F"
+NAV_COLOR = "#5B7CFA"
+DD_COLOR = "#F05D64"
 
 
 # ──────────────────────── 数据访问(带缓存) ────────────────────────
@@ -112,7 +112,7 @@ def show_targets(fp: Path):
     if rc.get("skipped"):
         st.caption(f"对账:{rc['skipped']}")
     elif rc.get("deviations"):
-        st.warning(f"⚠️ 上一执行日({rc.get('date', '?')})账实不符:"
+        st.warning(f"上一执行日({rc.get('date', '?')})账实不符:"
                    f"{len(rc['deviations'])} 只标的超出容忍度——"
                    "请确认 QMT 薄壳是否正常执行")
         st.dataframe(pd.DataFrame([
@@ -121,7 +121,7 @@ def show_targets(fp: Path):
              "偏差": f"{d['diff']:+.1%}"} for d in rc["deviations"]]),
             width="stretch", hide_index=True)
     elif rc.get("date"):
-        st.caption(f"对账:上一执行日({rc['date']})账实一致 ✓")
+        st.caption(f"对账：上一执行日（{rc['date']}）账实一致")
 
     st.caption(f"策略 {p['strategy']} · 参数指纹 {p['params_fingerprint']} · "
                f"生成于 {p['generated_at']} · 校验和 {p['checksum'][:12]}…")
@@ -261,7 +261,7 @@ def render_param_form(d: dict, prefix: str, live_profiles=None) -> dict:
     def _live_label(profile_id: str) -> str:
         profile = profiles.profiles.get(profile_id)
         if profile is None:
-            return f"⚠️ 不存在的配置 ({profile_id})"
+            return f"不存在的配置（{profile_id}）"
         return f"{profile.name} ({profile_id})"
 
     selected_profile = st.selectbox(

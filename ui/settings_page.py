@@ -12,6 +12,7 @@ import yaml
 from sinan.config import ExecutionCfg, RiskCfg, Settings
 from ui.common import ROOT, enum_ix, num_or
 from ui.live_profiles import render_live_profiles_page
+from ui.theme import page_header, section_title
 
 SET_PATH = ROOT / "config" / "settings.yaml"
 
@@ -24,7 +25,8 @@ _DEF_RISK = RiskCfg().model_dump()
 
 
 def page():
-    st.subheader("设置")
+    page_header("设置", "系统能力与命名实盘配置的统一入口",
+                eyebrow="Platform settings")
     system_tab, live_tab = st.tabs(["系统设置", "实盘配置"])
     with system_tab:
         _render_system_settings()
@@ -53,7 +55,7 @@ def _render_system_settings():
             type="password", key=f"set_{fkey}_hook",
             help="群机器人 webhook 地址;targets 生成与风控裁剪会推送摘要")
 
-        st.markdown("**执行(execution)**")
+        section_title("执行（execution）")
         ex = dict(d.get("execution") or {})
         e1, e2, e3, e4 = st.columns(4)
         pm_opts = ["close", "open"]
@@ -74,7 +76,7 @@ def _render_system_settings():
             step=0.01, format="%.2f", key=f"set_{fkey}_tp"))
         out["execution"] = ex
 
-        st.markdown("**风控(risk,执行层强制)**")
+        section_title("风控（risk，执行层强制）")
         rk = dict(d.get("risk") or {})
         r1, r2, r3 = st.columns(3)
         rk["max_weight_per_symbol"] = float(r1.number_input(
@@ -105,7 +107,7 @@ def _render_system_settings():
                  "(仅提示不阻断)。别设太紧:价格漂移本身就会造成权重偏差"))
         out["risk"] = rk
 
-        st.markdown("**QMT 远端接口(qmt_rpc)**")
+        section_title("QMT 远端接口（qmt_rpc）")
         qr = dict(d.get("qmt_rpc") or {})
         q1, q2, q3 = st.columns(3)
         qr["host"] = q1.text_input(
@@ -117,9 +119,31 @@ def _render_system_settings():
             "timeout(秒)", value=float(qr.get("timeout", 15.0)), step=5.0,
             key=f"set_{fkey}_qt"))
         out["qmt_rpc"] = qr
-        st.caption("⚠️ token 不在此配置:写入本机 `~/.qmt_rpc_token`(单行,建议 "
+        st.caption("安全提示：token 不在此配置；写入本机 `~/.qmt_rpc_token`（单行，建议 "
                    "`chmod 600`),严禁进仓库/配置/日志。远程访问务必走 SSH 隧道"
                    "或 Tailscale,token 只是第二道锁——见 docs/qmt-deploy.md。")
+
+        section_title("数据源优先级（data.sources）")
+        data_cfg = dict(d.get("data") or {})
+        current_sources = [str(source) for source in
+                           (data_cfg.get("sources") or _DEF["data"]["sources"])]
+        known_sources = ["sina", "akshare", "tushare", "qmt"]
+        source_options = current_sources + [
+            source for source in known_sources if source not in current_sources
+        ]
+        selected_sources = st.multiselect(
+            "按顺序尝试的数据源",
+            source_options,
+            default=current_sources,
+            key=f"set_{fkey}_sources",
+            help="前一个源不可用时自动降级到后一个；QMT 仅在交易机或 RPC 可用时启用",
+        )
+        if selected_sources:
+            out["data"] = {**data_cfg, "sources": selected_sources}
+        else:
+            st.error("至少保留一个数据源")
+            out["data"] = {**data_cfg, "sources": []}
+        st.caption("新增数据源会追加在末尾；如需精确调整优先顺序，可切换到高级 YAML。")
 
         text = yaml.safe_dump(out, allow_unicode=True, sort_keys=False,
                               default_flow_style=False)

@@ -18,7 +18,7 @@ Claude Code 经 CLAUDE.md 的 @AGENTS.md 导入。
 无构建系统、无 lint 配置。依赖:`pip install pandas numpy duckdb pyarrow pydantic pyyaml loguru pytest streamlit plotly akshare`
 
 ```bash
-python3 -m pytest tests/ -q                          # 全量测试(265 个)
+python3 -m pytest tests/ -q                          # 全量测试(277 个)
 python3 -m pytest tests/test_engine.py -q            # 单文件
 python3 -m pytest tests/test_dca.py::test_strategy_yaml -q   # 单测试
 
@@ -81,6 +81,7 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   定仓,是"入场时刻锁定权重"约定的唯一例外。
 - **面板只做编排与展示**,不含策略/引擎逻辑:app.py 是 st.navigation 路由入口
   (左侧分组:量化策略/数据中心),页面在 ui/ 包、共享层 ui/common.py;
+  `ui/theme.py` 是统一深色设计系统,核心流程页都显示“数据→回测→实盘”阶段;
   设置页分“系统设置/实盘配置”页签,实盘配置 CRUD 在 `ui/live_profiles.py`;
   策略页只选择配置引用,不允许内联编辑 QMT 参数。
   回测页遵循"一次回测=一份报告"(HTML 归档 + .cfg.yaml 快照 + .result.json
@@ -91,8 +92,9 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
 - **adj_factor 缺失语义是组内 ffill,永远不是 1.0**——曾因 fillna(1.0) 炸出
   ±264% 伪收益(bootstrap 与 store.write_bars 双层防护,回归测试锁定)。
 - 成本:ETF 单边 5bp、个股 8bp;年化基准 `TRADING_DAYS=244`;蒙特卡洛固定 seed。
-- 数据加载:优先 var/store 缓存,缺失才联网(sina 主用增量,tushare 备源需
-  `~/.tushare_token`,token 严禁写入仓库/日志)。
+- 数据加载:优先 var/store 缓存,缺失才按 `settings.data.sources` 顺序调用
+  `sina`/`akshare`/`tushare`/`qmt` 适配器;源链至少一项且不得重复。
+  tushare 需 `~/.tushare_token`,token 严禁写入仓库/日志。
 - **跳变阈值按标的算**,唯一定义在 `data/quality.jump_threshold`(=limit_pct×1.05),
   增量拉取与日更审计共用:曾硬编码 0.11,会把科创板 ETF(20% 涨跌幅)的合法
   行情判成坏数据拒绝入库,而影子链路"任一标的失败即中止",当天直接没有信号。

@@ -4,6 +4,7 @@ import streamlit as st
 
 from sinan.config import load_settings
 from ui.common import get_store
+from ui.theme import metric_strip, page_header, section_title, workflow_bar
 
 _SEC_LABEL = {"etf": "ETF", "stock": "个股", "cb": "转债"}
 
@@ -20,20 +21,23 @@ def _disk_mb() -> float:
 
 
 def page():
-    st.subheader("数据仓概况")
+    page_header("数据仓概况", "检查品种覆盖、交易日历与本地存储健康度",
+                eyebrow="Data warehouse")
+    workflow_bar("data")
     store = get_store()
     cov = _coverage()
     if cov.empty:
         st.warning("数据仓为空——先运行 scripts/bootstrap_from_csv.py 种子化。")
         return
     cal = store.read_calendar()
-    m = st.columns(4)
-    m[0].metric("品种", " / ".join(_SEC_LABEL.get(t, t) for t in cov["sec_type"]))
-    m[1].metric("总行数", f"{int(cov['n_rows'].sum()):,}")
-    m[2].metric("交易日历", f"{cal[0].date()} → {cal[-1].date()}")
-    m[3].metric("磁盘占用", f"{_disk_mb():,.0f} MB")
+    metric_strip([
+        ("品种", " / ".join(_SEC_LABEL.get(t, t) for t in cov["sec_type"]), ""),
+        ("总行数", f"{int(cov['n_rows'].sum()):,}", ""),
+        ("交易日历", f"{cal[0].date()} → {cal[-1].date()}", ""),
+        ("磁盘占用", f"{_disk_mb():,.0f} MB", ""),
+    ])
 
-    st.markdown("**分品种覆盖**")
+    section_title("分品种覆盖")
     view = cov.copy()
     view["sec_type"] = view["sec_type"].map(lambda t: _SEC_LABEL.get(t, t))
     view["min_date"] = view["min_date"].dt.date

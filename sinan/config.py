@@ -131,6 +131,22 @@ class DataCfg(BaseModel):
     def _none_as_default(cls, v):
         return ["akshare", "tushare"] if v is None else v
 
+    @field_validator("sources")
+    @classmethod
+    def _normalize_source_chain(cls, values: list[str]) -> list[str]:
+        """源链是有序回退契约:至少一项、名称规范化、不得重复。"""
+        if not values:
+            raise ValueError("至少配置一个数据源")
+        normalized: list[str] = []
+        for value in values:
+            source = value.strip().lower()
+            if not source:
+                raise ValueError("数据源名称不能为空")
+            if source in normalized:
+                raise ValueError(f"数据源不能重复:{source}")
+            normalized.append(source)
+        return normalized
+
 
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -43,6 +43,13 @@ def test_settings_page_no_longer_edits_inline_qmt():
     assert "qmt_rpc" in SRC
 
 
+def test_settings_form_exposes_multi_source_priority():
+    assert "st.multiselect" in SRC
+    assert 'data.sources' in SRC
+    for source in ("sina", "akshare", "tushare", "qmt"):
+        assert f'"{source}"' in SRC
+
+
 def test_strategy_form_uses_profile_reference_not_inline_qmt():
     source = COMMON_PAGE.read_text(encoding="utf-8")
     assert "live_profile" in source

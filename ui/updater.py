@@ -15,6 +15,7 @@ import streamlit as st
 
 from sinan.config import load_settings
 from ui.common import ROOT, get_store
+from ui.theme import metric_strip, page_header, section_title, workflow_bar
 
 LOG_PATH = ROOT / "var" / "runtime" / "update_log.json"
 
@@ -40,13 +41,14 @@ def _last_run() -> dict | None:
 
 
 def _show_run(run: dict) -> None:
-    m = st.columns(5)
-    m[0].metric("上次更新", run.get("run_at", "—")[:16].replace("T", " "))
-    m[1].metric("更新标的", f"{len(run.get('updated', []))} 只")
-    m[2].metric("入库行数", f"{run.get('rows', 0):,}")
-    m[3].metric("已最新", f"{len(run.get('up_to_date', []))} 只")
     n_fail = len(run.get("failed", []))
-    m[4].metric("失败", f"{n_fail} 只")
+    metric_strip([
+        ("上次更新", run.get("run_at", "—")[:16].replace("T", " "), ""),
+        ("更新标的", f"{len(run.get('updated', []))} 只", ""),
+        ("入库行数", f"{run.get('rows', 0):,}", ""),
+        ("已最新", f"{len(run.get('up_to_date', []))} 只", "success"),
+        ("失败", f"{n_fail} 只", "danger" if n_fail else "success"),
+    ])
     if n_fail:
         st.error(f"{n_fail} 只标的更新失败——逐条原因:")
         st.dataframe(pd.DataFrame(run["failed"])
@@ -58,7 +60,9 @@ def _show_run(run: dict) -> None:
 
 
 def page():
-    st.subheader("数据更新")
+    page_header("数据更新", "按全部策略池并集增量同步，并公开每个失败原因",
+                eyebrow="Data operations")
+    workflow_bar("data")
     uni = _union_universe()
     st.caption(f"更新范围 = 全部策略配置池的并集(当前 {len(uni)} 只 ETF);"
                "全市场种子化/重建走命令行 scripts/bootstrap_from_csv.py。")
@@ -80,7 +84,7 @@ def page():
 
     # ---- 手动触发 --------------------------------------------------------
     c1, c2 = st.columns([1, 2])
-    if c1.button(f"▶ 增量更新全部({len(uni)} 只)", type="primary"):
+    if c1.button(f"增量更新全部（{len(uni)} 只）", type="primary"):
         with st.spinner(f"逐只增量拉取 {len(uni)} 只(约 {len(uni) * 0.4:.0f} 秒)…"):
             r = subprocess.run([sys.executable,
                                 str(ROOT / "scripts" / "nightly_update.py")],
@@ -112,7 +116,7 @@ def page():
 
     # ---- 自动定时 --------------------------------------------------------
     st.divider()
-    st.markdown("**夜间自动更新(推荐)**")
+    section_title("夜间自动更新（推荐）")
     st.caption("交易日 20:00 自动增量;失败会写入上方日志并经企业微信告警"
                "(设置页配置 webhook)。在终端执行 `crontab -e` 加入:")
     st.code(f"0 20 * * 1-5 cd {ROOT} && /usr/bin/env python3 "

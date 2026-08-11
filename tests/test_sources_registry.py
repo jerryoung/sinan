@@ -87,3 +87,29 @@ def test_settings_data_sources_configurable(tmp_path):
     # 未配置 data 段时回落默认链
     (tmp_path / "s2.yaml").write_text("capital: 1\n", encoding="utf-8")
     assert load_settings(tmp_path / "s2.yaml").data.sources == ["akshare", "tushare"]
+
+
+def test_settings_data_sources_are_normalized(tmp_path):
+    from sinan.config import load_settings
+    (tmp_path / "s.yaml").write_text(
+        "data:\n  sources: [' QMT ', AKSHARE]\n",
+        encoding="utf-8",
+    )
+    assert load_settings(tmp_path / "s.yaml").data.sources == ["qmt", "akshare"]
+
+
+@pytest.mark.parametrize(
+    ("yaml_text", "error"),
+    [
+        ("data:\n  sources: []\n", "至少配置一个数据源"),
+        ("data:\n  sources: [akshare, AKSHARE]\n", "数据源不能重复"),
+        ("data:\n  sources: [akshare, ' ']\n", "数据源名称不能为空"),
+    ],
+)
+def test_settings_data_sources_reject_invalid_chains(tmp_path, yaml_text, error):
+    from pydantic import ValidationError
+    from sinan.config import load_settings
+
+    (tmp_path / "s.yaml").write_text(yaml_text, encoding="utf-8")
+    with pytest.raises(ValidationError, match=error):
+        load_settings(tmp_path / "s.yaml")

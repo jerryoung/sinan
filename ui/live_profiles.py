@@ -11,6 +11,7 @@ from sinan.live.profiles import (ProfileDeleteBlocked, delete_live_profile,
                                  set_default_live_profile,
                                  upsert_live_profile)
 from ui.common import ROOT, enum_ix
+from ui.theme import section_title
 
 LIVE_PATH = ROOT / "config" / "live_profiles.yaml"
 STRATEGY_DIR = ROOT / "config" / "strategies"
@@ -55,7 +56,7 @@ def render_live_profiles_page() -> None:
     selected = st.selectbox(
         "选择实盘配置",
         options,
-        format_func=lambda x: "＋ 新增配置" if x == _NEW else _profile_label(x, cfg),
+        format_func=lambda x: "新增配置" if x == _NEW else _profile_label(x, cfg),
         key=f"live_profile_{fkey}_selected",
     )
     is_new = selected == _NEW
@@ -81,7 +82,7 @@ def render_live_profiles_page() -> None:
         key=f"live_profile_{fkey}_{selected}_engine",
     )
 
-    st.markdown("**QMT 执行参数**")
+    section_title("QMT 执行参数")
     account_col, mode_col, offset_col, qty_col = st.columns(4)
     account = account_col.text_input(
         "资金账号（可选）",

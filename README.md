@@ -30,10 +30,10 @@ python3 scripts/run_backtest.py --strategy config/strategies/combo_turtle_xsmom_
 # 3) 影子模式:拉数 → 质检 → 生成当日目标仓位(var/runtime/targets/)
 python3 scripts/shadow_update.py --strategy config/strategies/combo_turtle_xsmom_x2.yaml
 
-# 4) 操作面板(影子模式 / 策略配置 / 回测 / 数据查询)
+# 4) 操作面板(数据 → 回测 → 实盘研究工作台)
 streamlit run app.py
 
-# 测试(265 个,含回测快照、事件追踪与实盘配置接线测试)
+# 测试(277 个,含回测快照、事件追踪与实盘配置接线测试)
 python3 -m pytest tests/ -q
 ```
 
@@ -112,7 +112,8 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 
 ## 操作面板(app.py + ui/)
 
-`streamlit run app.py`。左侧分组导航(st.navigation 多页架构,页面相互隔离、
+`streamlit run app.py`。平台使用统一深色研究工作台和“数据 → 回测 → 实盘”
+流程导航。左侧分组导航(st.navigation 多页架构,页面相互隔离、
 按需执行);"当前策略(全局)"选择器只在量化策略模块的页面右上角出现,
 切换页面选择保持:
 
@@ -124,6 +125,8 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 - **数据中心**:行情查询(标的搜索 + K 线)· 数据仓概况(三品种覆盖/日历/
   标的档案)· 数据更新(增量=全部策略池并集,手动批量同步,夜间 20:00
   cron 自动更新——失败逐条报告标的/时间窗/原因,写 var/runtime/update_log.json)
+- **数据源链**:设置页按优先级选择 `sina`、`akshare`、`tushare`、`qmt`;
+  单源不可用时自动降级到下一项,空链、重复项和空名称在保存前直接拒绝。
 
 ## 研究档案
 

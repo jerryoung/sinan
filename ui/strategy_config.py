@@ -7,12 +7,13 @@ import yaml
 from sinan.config import (StrategyCfg, load_live_profiles,
                           resolve_live_profile)
 from ui.common import ROOT, current_sel, render_param_form, to_yaml
+from ui.theme import page_header
 
 
 def page():
     sel_bt, _, sel_label = current_sel()
-    st.subheader("策略配置")
-    st.caption(f"当前编辑:**{sel_label}**(文件 {sel_bt.name},在左侧边栏切换)")
+    page_header("策略配置", f"{sel_label} · {sel_bt.name} · 参数、标的池与实盘配置引用",
+                eyebrow="Strategy definition")
     raw = sel_bt.read_text(encoding="utf-8")
     d0 = yaml.safe_load(raw)
     # 控件 key 绑定文件内容指纹:YAML 在别处(高级模式/外部编辑)变更后,

@@ -3,11 +3,13 @@ import pandas as pd
 import streamlit as st
 
 from ui.common import NAV_COLOR, etf_names, get_store, instruments_df
+from ui.theme import metric_strip, page_header, workflow_bar
 
 
 def page():
-    st.subheader("行情查询")
-    st.caption("parquet + DuckDB 数据仓;后复权=信号口径,原始价=执行口径。")
+    page_header("行情查询", "从本地数据仓检查信号口径与执行口径的行情覆盖",
+                eyebrow="Market data")
+    workflow_bar("data")
     q = st.text_input("搜索标的(代码或名称片段)", "510300")
     inst = instruments_df()
     hits = inst[inst["symbol"].str.contains(q, na=False)
@@ -29,22 +31,31 @@ def page():
         return
     bars = bars.sort_values("date")
     full = get_store().read_bars(symbols=[pick], sec_type="etf")
-    m = st.columns(5)
-    m[0].metric("区间行数", len(bars))
-    m[1].metric("数据覆盖", f"{full['date'].min().date()} 起")
-    m[2].metric("最新日期", str(full["date"].max().date()))
-    m[3].metric("最新收盘", f"{bars['close'].iloc[-1]:.3f}")
     fac = full.get("adj_factor")
-    m[4].metric("最新复权因子",
-                f"{float(fac.iloc[-1]):.4f}" if fac is not None and len(fac) else "—")
+    metric_strip([
+        ("区间行数", f"{len(bars):,}", ""),
+        ("数据覆盖", f"{full['date'].min().date()} 起", ""),
+        ("最新日期", str(full["date"].max().date()), ""),
+        ("最新收盘", f"{bars['close'].iloc[-1]:.3f}", ""),
+        ("最新复权因子",
+         f"{float(fac.iloc[-1]):.4f}" if fac is not None and len(fac) else "—", ""),
+    ])
     try:
         import plotly.graph_objects as go
         fig = go.Figure(go.Candlestick(
             x=bars["date"], open=bars["open"], high=bars["high"],
             low=bars["low"], close=bars["close"],
-            increasing_line_color="#C4433F", decreasing_line_color="#2E8B57"))
-        fig.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10),
-                          xaxis_rangeslider_visible=False)
+            increasing_line_color="#F05D64", decreasing_line_color="#3DBE8B"))
+        fig.update_layout(
+            height=420,
+            margin=dict(l=10, r=10, t=10, b=10),
+            xaxis_rangeslider_visible=False,
+            paper_bgcolor="#0B1118",
+            plot_bgcolor="#0B1118",
+            font=dict(color="#B8C2D0"),
+            xaxis=dict(gridcolor="#273241", zerolinecolor="#273241"),
+            yaxis=dict(gridcolor="#273241", zerolinecolor="#273241"),
+        )
         st.plotly_chart(fig, width="stretch")
     except ImportError:
         st.line_chart(bars.set_index("date")["close"].rename("收盘"),
