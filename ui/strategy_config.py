@@ -4,7 +4,8 @@ import hashlib
 import streamlit as st
 import yaml
 
-from sinan.config import StrategyCfg
+from sinan.config import (StrategyCfg, load_live_profiles,
+                          resolve_live_profile)
 from ui.common import ROOT, current_sel, render_param_form, to_yaml
 
 
@@ -33,7 +34,9 @@ def page():
                             key="yaml_text", height=280)
 
     def _parse(txt) -> StrategyCfg:
-        return StrategyCfg(**yaml.safe_load(txt))
+        cfg = StrategyCfg(**yaml.safe_load(txt))
+        resolve_live_profile(load_live_profiles(), cfg)
+        return cfg
 
     e1, e2, e3, _ = st.columns([1, 1, 2, 3])
     if e1.button("校验"):

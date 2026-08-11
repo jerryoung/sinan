@@ -16,7 +16,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
-from sinan.config import load_settings  # noqa: E402
+from sinan.config import load_live_profiles, load_settings  # noqa: E402
 
 NAV_COLOR = "#4269D0"
 DD_COLOR = "#C4433F"
@@ -213,7 +213,7 @@ def params_grid(strat: str, params: dict, prefix: str) -> dict:
     return out
 
 
-def render_param_form(d: dict, prefix: str) -> dict:
+def render_param_form(d: dict, prefix: str, live_profiles=None) -> dict:
     """按参数元数据渲染表单(带 ❓),返回编辑后的配置 dict。
     combo(多策略组合)以嵌套子表单渲染各腿。"""
     strat = d.get("strategy", "")
@@ -251,45 +251,38 @@ def render_param_form(d: dict, prefix: str) -> dict:
                        if s.strip()]
     st.caption(f"当前池 {len(out['universe'])} 只")
 
-    # QMT 实盘执行(策略级覆盖):不启用则 targets 用 设置页·实盘设置 的全局配置
-    has_qmt = bool(d.get("qmt"))
-    with st.expander("QMT 实盘执行(策略级覆盖,可选)", expanded=has_qmt):
-        use_qmt = st.checkbox(
-            "启用策略级覆盖(整体替代全局实盘设置,不做键级合并)",
-            value=has_qmt, key=f"pf_{prefix}_qmt_on",
-            help="不勾选 = targets 使用 设置页·实盘设置 的全局 QMT 配置(或薄壳缺省)")
-        if use_qmt:
-            q = dict(d.get("qmt") or {})
-            a = dict(q.get("algo") or {})
-            qc1, qc2, qc3, qc4 = st.columns(4)
-            acct = qc1.text_input(
-                "account(空=QMT 绑定账号)", q.get("account", ""),
-                key=f"pf_{prefix}_qmt_acct",
-                help="资金账号;当前薄壳按 QMT 绑定账号下单,此字段仅随 "
-                     "targets 留痕(多账号扩展预留),推荐留空")
-            qm_opts = ["latest", "limit"]
-            a["quote_mode"] = qc2.selectbox(
-                "algo.quote_mode", qm_opts,
-                index=enum_ix(qm_opts, a.get("quote_mode"), "latest"),
-                key=f"pf_{prefix}_qmt_qm",
-                help="latest=最新价市价单;limit=限价单(带偏移)")
-            a["price_offset"] = float(qc3.number_input(
-                "algo.price_offset", value=num_or(a.get("price_offset"), 0.002, float),
-                step=0.001, format="%.3f", key=f"pf_{prefix}_qmt_po",
-                help="限价单相对最新价的让价比例:买挂高、卖挂低"))
-            a["max_order_qty"] = int(qc4.number_input(
-                "algo.max_order_qty", value=num_or(a.get("max_order_qty"), 10000, int),
-                step=1000, key=f"pf_{prefix}_qmt_mq", help="单笔拆单上限(股)"))
-            st.caption("注:保存即把上述算法参数固化进策略 YAML——原本"
-                       "『algo 留空、跟随薄壳缺省』的语义会被替换为本地快照。")
-            if acct.strip():
-                q["account"] = acct.strip()
-            else:
-                q.pop("account", None)
-            q["algo"] = a
-            out["qmt"] = q
-        else:
-            out.pop("qmt", None)
+    # 策略只保存命名实盘配置 ID;QMT 参数的唯一编辑入口在 设置·实盘配置。
+    profiles = live_profiles or load_live_profiles()
+    current_profile = str(d.get("live_profile") or profiles.default)
+    profile_ids = list(profiles.profiles)
+    if current_profile not in profiles.profiles:
+        profile_ids.insert(0, current_profile)  # 悬空引用保留可见,不静默改成默认
+
+    def _live_label(profile_id: str) -> str:
+        profile = profiles.profiles.get(profile_id)
+        if profile is None:
+            return f"⚠️ 不存在的配置 ({profile_id})"
+        return f"{profile.name} ({profile_id})"
+
+    selected_profile = st.selectbox(
+        "实盘配置",
+        profile_ids,
+        index=profile_ids.index(current_profile),
+        format_func=_live_label,
+        key=f"pf_{prefix}_live_profile",
+        help="参数在『设置 → 实盘配置』统一维护;多个策略可引用同一配置",
+    )
+    out["live_profile"] = selected_profile
+    selected_cfg = profiles.profiles.get(selected_profile)
+    if selected_cfg is None:
+        st.error(f"实盘配置 {selected_profile!r} 不存在,保存前请选择有效配置")
+    else:
+        algo = selected_cfg.qmt.algo
+        st.caption(
+            f"引擎 {selected_cfg.engine} · 报价 {algo.quote_mode} · "
+            f"限价偏移 {algo.price_offset:.3%} · 单笔上限 {algo.max_order_qty:,} 股。"
+            "修改参数请前往『设置 → 实盘配置』。"
+        )
 
     params = dict(d.get("params", {}))
     if strat == "combo":

@@ -2,6 +2,7 @@
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from sinan.config import (
@@ -9,9 +10,11 @@ from sinan.config import (
     LiveProfilesCfg,
     QmtAlgoCfg,
     QmtExecutionCfg,
+    ROOT,
     Settings,
     StrategyCfg,
     load_live_profiles,
+    load_strategy,
     resolve_live_profile,
     save_live_profiles,
 )
@@ -53,6 +56,15 @@ def test_repo_live_profiles_has_local_qmt():
     assert cfg.profiles["local_qmt"].qmt.algo.quote_mode == "latest"
     assert cfg.profiles["local_qmt"].qmt.algo.price_offset == pytest.approx(0.002)
     assert cfg.profiles["local_qmt"].qmt.algo.max_order_qty == 10000
+
+
+def test_all_repo_strategies_explicitly_reference_existing_profile():
+    profiles = load_live_profiles()
+    for path in sorted((ROOT / "config" / "strategies").glob("*.yaml")):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        assert raw.get("live_profile"), path.name
+        assert "qmt" not in raw, path.name
+        resolve_live_profile(profiles, load_strategy(path))
 
 
 def test_settings_no_longer_has_inline_live_qmt():

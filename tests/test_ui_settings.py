@@ -13,6 +13,7 @@ from sinan.config import ExecutionCfg, RiskCfg, Settings
 
 PAGE = Path(__file__).resolve().parents[1] / "ui" / "settings_page.py"
 LIVE_PAGE = Path(__file__).resolve().parents[1] / "ui" / "live_profiles.py"
+COMMON_PAGE = Path(__file__).resolve().parents[1] / "ui" / "common.py"
 SRC = PAGE.read_text(encoding="utf-8")
 
 #: 这些键的表单缺省必须来自模型。qmt_rpc 不在此列:它不是 pydantic 子模型
@@ -40,6 +41,14 @@ def test_settings_page_no_longer_edits_inline_qmt():
     assert "配置全局 QMT 执行参数" not in SRC
     assert 'out["live"]' not in SRC
     assert "qmt_rpc" in SRC
+
+
+def test_strategy_form_uses_profile_reference_not_inline_qmt():
+    source = COMMON_PAGE.read_text(encoding="utf-8")
+    assert "live_profile" in source
+    assert "load_live_profiles" in source
+    assert "QMT 实盘执行(策略级覆盖" not in source
+    assert 'out["qmt"]' not in source
 
 
 def test_no_literal_defaults_for_model_backed_fields():

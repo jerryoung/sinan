@@ -1,6 +1,7 @@
 name: combo_turtle_xsmom_x2
 display_name: 组合:海龟×2 + 截面动量×2
 strategy: combo
+live_profile: local_qmt
 sec_type: etf
 universe: ['510300', '159915', '512010', '510420', '159995', '512660', '512690', '513050',
   '512400', '515220', '510900', '513500', '159941', '513030', '518880', '159980',

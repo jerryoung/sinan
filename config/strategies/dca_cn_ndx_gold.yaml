@@ -1,6 +1,7 @@
 name: dca_cn_ndx_gold
 display_name: 定投:中国+纳指+黄金
 strategy: dca
+live_profile: local_qmt
 sec_type: etf
 universe: ['510300', '159941', '518880']
 lookback: 750

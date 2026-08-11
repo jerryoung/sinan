@@ -4,6 +4,7 @@
 name: livermore_etf
 display_name: 利维摩尔 · 低换手
 strategy: livermore
+live_profile: local_qmt
 sec_type: etf
 universe: ["510300", "510500", "159915", "512880", "518880", "513100", "511010"]
 lookback: 750          # 信号重放窗口(根),须覆盖最长持仓周期
