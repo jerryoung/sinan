@@ -14,6 +14,7 @@ var/
 .DS_Store
 .vscode/
 .idea/
+.worktrees/
 
 # ══════════════ 以下为 GitHub Python 通用模板 ══════════════
 # Byte-compiled / optimized / DLL files
