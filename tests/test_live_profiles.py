@@ -132,6 +132,19 @@ def test_resolver_returns_profile_id_and_deep_copy():
     assert profiles.profiles["local_qmt"].qmt.algo.price_offset == pytest.approx(0.002)
 
 
+def test_resolved_profile_serializes_for_existing_qmt_shell_contract():
+    profile_id, profile = resolve_live_profile(_profiles(), _strategy())
+    qmt = profile.qmt.model_dump(mode="json", exclude_none=True)
+    assert profile_id == "local_qmt"
+    assert qmt == {
+        "algo": {
+            "quote_mode": "latest",
+            "price_offset": 0.002,
+            "max_order_qty": 10000,
+        }
+    }
+
+
 def test_profile_yaml_roundtrip_and_atomic_save(tmp_path):
     path = tmp_path / "live_profiles.yaml"
     out = save_live_profiles(_profiles(), path)

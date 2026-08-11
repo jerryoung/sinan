@@ -36,7 +36,8 @@ def main() -> int:
 
     import pandas as pd
 
-    from sinan.config import load_rules, load_settings, load_strategy, resolve_qmt
+    from sinan.config import (load_live_profiles, load_rules, load_settings,
+                              load_strategy, resolve_live_profile)
     from sinan.data.store import DataStore
     from sinan.live.broker import QmtShellBroker
     from sinan.live.notify import notify
@@ -49,6 +50,8 @@ def main() -> int:
 
     settings = load_settings()
     cfg = load_strategy(args.strategy)
+    profile_id, live_profile = resolve_live_profile(load_live_profiles(), cfg)
+    qmt_cfg = live_profile.qmt.model_dump(mode="json", exclude_none=True)
     store = DataStore(settings.store_root)
     today = pd.Timestamp(args.date)
 
@@ -123,16 +126,14 @@ def main() -> int:
     # date=执行日(薄壳当日校验的那一天);data_cutoff=信号数据截止,两者可差一天
     payload = build_payload(weights, strategy_name=cfg.name,
                             date=today, data_cutoff=data_cutoff,
-                            params_fingerprint=cfg.params)
+                            params_fingerprint=cfg.params,
+                            live_profile=profile_id, qmt=qmt_cfg)
     # 参考委托单(仅供影子模式/人工执行;QMT 薄壳仍按实时账户自算差额)
     prices = {s: float(df["close_raw"].iloc[-1]) if "close_raw" in df
               else float(df["close"].iloc[-1]) for s, df in data.items()}
     payload["capital"] = total_asset
     payload["reconcile"] = recon.as_dict()   # 上一执行日的对账结论,随当日决策留痕
-    # 账号/下单算法透传给 QMT 薄壳:策略级 qmt 整体覆盖,缺省用全局实盘设置
-    qmt_cfg = resolve_qmt(settings, cfg)
-    if qmt_cfg:
-        payload["qmt"] = qmt_cfg
+    # qmt 仍使用薄壳既有字段协议;live_profile 额外记录命名配置 ID 供追溯
     payload["ref_orders"] = build_ref_orders(
         weights, current_weights=positions, capital=total_asset, prices=prices,
         lot_sizes={s: r.lot_size for s, r in rules.items()},

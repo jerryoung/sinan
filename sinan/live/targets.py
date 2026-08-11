@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from datetime import datetime
@@ -180,6 +181,8 @@ def build_payload(
     date,
     data_cutoff,
     params_fingerprint,
+    live_profile: str | None = None,
+    qmt: dict | None = None,
 ) -> dict:
     """
     组装 targets 文件内容(§9.5 运行留痕)。
@@ -195,7 +198,7 @@ def build_payload(
     fp = (params_fingerprint if isinstance(params_fingerprint, str)
           else params_fingerprint_of(dict(params_fingerprint)))
     targets = {str(s): round(float(w), 6) for s, w in sorted(weights.items())}
-    return {
+    payload = {
         "date": pd.Timestamp(date).strftime("%Y-%m-%d"),
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "data_cutoff": str(data_cutoff),
@@ -204,6 +207,11 @@ def build_payload(
         "targets": targets,
         "checksum": targets_checksum(targets),
     }
+    if live_profile is not None:
+        payload["live_profile"] = str(live_profile)
+    if qmt is not None:
+        payload["qmt"] = copy.deepcopy(qmt)
+    return payload
 
 
 def targets_path(targets_dir, strategy: str, date) -> Path:

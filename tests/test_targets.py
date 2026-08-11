@@ -116,6 +116,26 @@ def test_payload_roundtrip(tmp_path):
     assert out["checksum"] == payload["checksum"]
 
 
+def test_payload_records_profile_and_keeps_qmt_shell_contract():
+    qmt = {"algo": {"quote_mode": "latest", "price_offset": 0.002,
+                    "max_order_qty": 10000}}
+    payload = build_payload(
+        {}, strategy_name="s", date="2026-08-11", data_cutoff="2026-08-10",
+        params_fingerprint={}, live_profile="local_qmt", qmt=qmt,
+    )
+    assert payload["live_profile"] == "local_qmt"
+    assert payload["qmt"] == qmt
+
+
+def test_payload_omits_optional_execution_fields_for_legacy_callers():
+    payload = build_payload(
+        {}, strategy_name="s", date="2026-08-11", data_cutoff="2026-08-10",
+        params_fingerprint={},
+    )
+    assert "live_profile" not in payload
+    assert "qmt" not in payload
+
+
 def test_params_fingerprint_deterministic():
     p1 = build_payload({}, strategy_name="s", date="2026-08-04", data_cutoff="2026-08-03",
                        params_fingerprint={"a": 1, "b": 2})
