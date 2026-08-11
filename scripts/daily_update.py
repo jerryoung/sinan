@@ -2,7 +2,8 @@
 """
 每日数据更新入口(17:00 cron,方案 §5.2)。
 
-流程:增量拉取当日行情(akshare 主源,tushare 备源)→ 入库 → 质检;
+流程:增量拉取当日行情(数据源链见 settings.data.sources,默认 akshare
+主源、tushare 备源;交易机可加 qmt 源)→ 入库 → 质检;
 质检不通过则告警并以退出码 1 结束——绝不触发后续信号计算。
 
 用法:
@@ -27,7 +28,7 @@ def main() -> int:
     import pandas as pd
 
     from sinan.config import load_settings
-    from sinan.data.sources.akshare_source import AkshareSource
+    from sinan.data.sources.base import build_sources
     from sinan.data.store import DataStore
     from sinan.data.update import run_daily
     from sinan.live.notify import notify
@@ -38,13 +39,15 @@ def main() -> int:
     def notify_fn(msg, **kw):
         notify(msg, webhook=settings.wecom_webhook, **kw)
 
-    # 主源 akshare;tushare 备源可选(token 缺失等不可用时降级为单源)
-    sources = [AkshareSource()]
+    # 数据源链由配置驱动(settings.data.sources):单个源不可用降级跳过
+    # (如 tushare token 缺失、非 QMT 机器),全部不可用则当日中止
     try:
-        from sinan.data.sources.tushare_source import TushareSource
-        sources.append(TushareSource())
+        sources = build_sources(
+            settings.data.sources,
+            on_error=lambda m: notify_fn(m, level="warning"))
     except Exception as e:  # noqa: BLE001
-        notify_fn(f"tushare 备源不可用,仅用主源: {e}", level="warning")
+        notify_fn(f"[数据更新] {args.date} 无可用数据源: {e}", level="error")
+        return 1
 
     day = pd.Timestamp(args.date)
     try:

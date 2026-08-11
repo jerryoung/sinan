@@ -8,6 +8,12 @@ reports_dir: var/reports          # 回测 HTML 报告
 
 wecom_webhook: ""             # 企业微信群机器人 webhook,空则只写本地日志
 
+data:                         # 日更数据源链:[主源, 备源, ...],按序逐调用降级切换
+  sources: [akshare, tushare] # 名字对应 sinan/data/sources/ 注册表(@register_source);
+                              # 加源/调顺序只改这里。单个源环境不可用(token 缺失、
+                              # 非 QMT 机器)自动降级跳过;全部不可用则当日中止。
+                              # qmt 源(RPC 直连交易机行情)仅交易机可用,需要时加在首位。
+
 live:                         # 实盘设置(系统级缺省)
   engine: qmt                 # 默认实盘引擎(当前仅 qmt = QMT 薄壳文件桥接)
   qmt: {}                     # 全局 QMT 执行配置(account/algo),策略级 qmt 整体覆盖;

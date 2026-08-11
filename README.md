@@ -1,4 +1,4 @@
-# 司南(SiNan)—— 轻量化多策略仓位导航系统
+# 司南(SiNan)—— 轻量化多策略量化系统
 
 > 每天基于规则给出目标仓位的个人量化系统:趋势、动量、定投都只是不同的
 > "定向算法",统一输出同一份 targets——司南给方向,不预测风浪。
@@ -33,7 +33,7 @@ python3 scripts/shadow_update.py --strategy config/strategies/combo_turtle_xsmom
 # 4) 操作面板(影子模式 / 策略配置 / 回测 / 数据查询)
 streamlit run app.py
 
-# 测试(231 个,含回测快照与事件追踪测试)
+# 测试(239 个,含回测快照与事件追踪测试)
 python3 -m pytest tests/ -q
 ```
 
@@ -41,7 +41,9 @@ python3 -m pytest tests/ -q
 
 ```
 sinan/             Python 包(核心代码,与项目同名)
-  ├ data/          DataStore(parquet 按年分区 + DuckDB)· bootstrap · 日更 · 质检 · 数据源适配
+  ├ data/          DataStore(parquet 按年分区 + DuckDB)· bootstrap · 日更 · 质检
+  │                └ sources/  数据源适配层:DataSource 抽象 + 注册表,
+  │                  akshare / tushare / qmt 各自单文件适配器,新源即插即用
   ├ universe/      交易规则推断(板块/T+0/涨跌幅)· 转债条款与强赎事件
   ├ signal/        SignalContext + 策略注册表 + strategies/(全部策略实现)
   ├ backtest/      engine(逐日循环)· execution_model · costs · report(指标+HTML)
@@ -133,7 +135,10 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 - 影子模式的"每日信号 vs 回测同期输出"自动比对(M3)未实现,机件已齐备。
 - 对账仅告警不阻断:账实不符会在看板与推送里显眼提示,但不会自动停掉
   次日执行(是否升级为硬阻断是风控决定,见 sinan/live/reconcile.py)。
-- 数据源:sina 主用(未复权增量+质检门),tushare 待恢复权限,
+- 数据源:akshare 主用、tushare 备源(token 缺失自动降级跳过),链路在
+  `settings.data.sources` 配置、按序逐调用切换;交易机可把 `qmt` 源
+  (RPC 直连行情)加在首位。新增数据源只需在 `sinan/data/sources/` 加一个
+  `{名字}_source.py` 并 `@register_source` 注册,调用方零改动。
   baostock/yahoo 实测不合格(详见档案)。
 
 > 本系统为研究用途,不构成投资建议。实盘前请完成影子验证与程序化交易报备。

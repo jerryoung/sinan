@@ -30,10 +30,9 @@ def fetch_incremental(store, symbols, sec_type: str = "etf",
     {run_at, updated: [sym], rows, latest, up_to_date: [sym],
      failed: [{symbol, start, end, error}]}
     """
-    import akshare as ak
-
     from ..config import load_rules
     from .quality import jump_threshold
+    from .sources.akshare_source import fetch_etf_hist_sina
 
     symbols = [str(s) for s in symbols]
     today = pd.Timestamp.today().normalize()
@@ -57,14 +56,11 @@ def fetch_incremental(store, symbols, sec_type: str = "etf",
         if start > today:
             up_to_date.append(s)
             continue
-        pre = "sh" if s.startswith(("5", "6")) else "sz"
         try:
-            df = ak.fund_etf_hist_sina(symbol=pre + s)
-            df["date"] = pd.to_datetime(df["date"])
+            # akshare 接口名只出现在适配器文件(sources/akshare_source.py);
+            # 逐标质检(OHLC + 跳变)留在本层
+            df = fetch_etf_hist_sina(s)
             df = df[(df["date"] >= start) & (df["date"] <= today)]
-            for c in ["open", "high", "low", "close", "volume"]:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-            df = df.dropna(subset=["close"]).sort_values("date")
             if not len(df):
                 up_to_date.append(s)          # 区间无新数据(节假日/周末)
                 time.sleep(pause)

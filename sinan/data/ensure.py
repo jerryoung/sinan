@@ -40,17 +40,14 @@ def ensure_bars(store, symbols, sec_type: str = "etf", log=print) -> list[str]:
         log(f"缺行情且暂不支持自动补数(sec_type={sec_type}):{missing}")
         return missing
 
-    import akshare as ak
+    from .sources.akshare_source import fetch_etf_hist_sina
 
     still, rows = [], []
     for s in missing:
-        pre = "sh" if s.startswith(("5", "6")) else "sz"
         try:
-            df = ak.fund_etf_hist_sina(symbol=pre + s)
-            df["date"] = pd.to_datetime(df["date"])
-            for c in ["open", "high", "low", "close", "volume"]:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-            df = df.dropna(subset=["close"]).sort_values("date")
+            # akshare 接口名只出现在适配器文件;质检口径(OHLC 硬门槛 +
+            # 0.20 仅告警)留在本层,见模块 docstring
+            df = fetch_etf_hist_sina(s)
             if not len(df):
                 raise ValueError("数据源空返回")
             bad = df[(df["high"] < df["low"] - 1e-9)

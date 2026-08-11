@@ -66,6 +66,21 @@ class LiveCfg(BaseModel):
         return {} if v is None else v
 
 
+class DataCfg(BaseModel):
+    """数据源链配置(日更 run_daily 的 [主源, 备源, ...] 顺序)。
+
+    名字对应 sinan/data/sources/ 注册表里的适配器(@register_source);
+    加源/换源/调顺序只改这里,不动调用方代码。单个源在当前环境不可用
+    (token 缺失、非 QMT 机器等)由 build_sources 降级跳过,全部不可用才报错。
+    """
+    sources: list[str] = Field(default_factory=lambda: ["akshare", "tushare"])
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def _none_as_default(cls, v):
+        return ["akshare", "tushare"] if v is None else v
+
+
 class Settings(BaseModel):
     # 名义本金:影子模式出参考委托单、回测默认初始资金用;实盘接入 QMT 后
     # 以 fills 回报的 total_asset 为准,此值仅作无回报时的兜底
@@ -87,6 +102,12 @@ class Settings(BaseModel):
 
     execution: ExecutionCfg = Field(default_factory=ExecutionCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)
+    data: DataCfg = Field(default_factory=DataCfg)
+
+    @field_validator("data", mode="before")
+    @classmethod
+    def _data_none_as_default(cls, v):
+        return {} if v is None else v
 
     def model_post_init(self, _ctx) -> None:
         # 相对路径统一落到项目根下,保证 cron 从任意 cwd 调用行为一致

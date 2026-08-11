@@ -5,7 +5,7 @@ Claude Code 经 CLAUDE.md 的 @AGENTS.md 导入。
 
 ## 项目定位
 
-司南(SiNan):个人多策略仓位导航系统(研究用途,影子模式运行中,未实盘)。
+司南(SiNan):个人多策略量化系统(研究用途,影子模式运行中,未实盘)。
 **核心承诺:同一份 `generate_targets` 纯函数同时服务回测与实盘**——回测引擎逐日
 重放它,影子/实盘每天调用它,任何改动都不能破坏这一对称性。用户是策略研究者,
 分析与结论用中文;代码沿用中文 docstring + 推导注释风格。
@@ -18,7 +18,7 @@ Claude Code 经 CLAUDE.md 的 @AGENTS.md 导入。
 无构建系统、无 lint 配置。依赖:`pip install pandas numpy duckdb pyarrow pydantic pyyaml loguru pytest streamlit plotly akshare`
 
 ```bash
-python3 -m pytest tests/ -q                          # 全量测试(231 个)
+python3 -m pytest tests/ -q                          # 全量测试(239 个)
 python3 -m pytest tests/test_engine.py -q            # 单文件
 python3 -m pytest tests/test_dca.py::test_strategy_yaml -q   # 单测试
 

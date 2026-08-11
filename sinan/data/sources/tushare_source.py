@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .base import DataSource, DataSourceError
+from .base import DataSource, DataSourceError, register_source
 
 _TOKEN_PATH = Path.home() / ".tushare_token"
 
@@ -44,8 +44,8 @@ def _ts_code(symbol: str, sec_type: str) -> str:
     return f"{symbol}.{ex}"
 
 
+@register_source("tushare")
 class TushareSource(DataSource):
-    name = "tushare"
 
     _BAR_API = {"stock": "daily", "etf": "fund_daily", "cb": "cb_daily"}
 

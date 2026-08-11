@@ -18,7 +18,7 @@ from __future__ import annotations
 import pandas as pd
 from loguru import logger
 
-from .base import DataSource, DataSourceError
+from .base import DataSource, DataSourceError, register_source
 
 # 东财日线接口(stock_zh_a_hist / fund_etf_hist_em)中文列 → store 标准列
 _CN_BARS = {
@@ -50,8 +50,41 @@ def _yyyymmdd(d) -> str:
     return pd.Timestamp(d).strftime("%Y%m%d")
 
 
+def fetch_etf_hist_sina(symbol: str) -> pd.DataFrame:
+    """新浪 ETF 日线全历史(ensure_bars 全量补数与 sina_feed 影子增量共用)。
+
+    akshare 接口名只允许出现在本文件——两个编排层此前各自 import
+    akshare 直调 fund_etf_hist_sina,接口变更要改三处;现收敛到这里。
+    返回 date/open/high/low/close/volume(数值化、按日期升序、去空收盘),
+    **未复权、无 adj_factor/amount**:复权语义由调用方按 store 存量口径
+    处理(全新标的 1.0 起步 / 增量沿用最后因子),OHLC 与跳变质检也留在
+    调用方(三处口径有意不同,见 data/ensure.py docstring)。
+    """
+    ak = _ak()
+    pre = "sh" if str(symbol).startswith(("5", "6")) else "sz"
+    try:
+        raw = ak.fund_etf_hist_sina(symbol=pre + str(symbol))
+    except Exception as e:
+        raise DataSourceError(
+            f"akshare fund_etf_hist_sina({symbol}) 失败: {e}") from e
+    if raw is None or not len(raw):
+        return pd.DataFrame(
+            columns=["date", "open", "high", "low", "close", "volume"])
+    miss = [c for c in ("date", "open", "high", "low", "close")
+            if c not in raw.columns]
+    if miss:
+        raise DataSourceError(
+            f"fund_etf_hist_sina 缺列 {miss}(akshare 版本变更?)")
+    df = raw.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    for c in ("open", "high", "low", "close", "volume"):
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df.dropna(subset=["close"]).sort_values("date").reset_index(drop=True)
+
+
+@register_source("akshare")
 class AkshareSource(DataSource):
-    name = "akshare"
 
     # ------------------------------------------------------------- bars
     def get_bars(self, symbols: list[str], sec_type: str, start, end) -> pd.DataFrame:
