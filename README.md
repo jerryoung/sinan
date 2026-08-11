@@ -33,7 +33,7 @@ python3 scripts/shadow_update.py --strategy config/strategies/combo_turtle_xsmom
 # 4) 操作面板(影子模式 / 策略配置 / 回测 / 数据查询)
 streamlit run app.py
 
-# 测试(264 个,含回测快照与事件追踪测试)
+# 测试(265 个,含回测快照、事件追踪与实盘配置接线测试)
 python3 -m pytest tests/ -q
 ```
 

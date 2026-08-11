@@ -18,7 +18,7 @@ Claude Code 经 CLAUDE.md 的 @AGENTS.md 导入。
 无构建系统、无 lint 配置。依赖:`pip install pandas numpy duckdb pyarrow pydantic pyyaml loguru pytest streamlit plotly akshare`
 
 ```bash
-python3 -m pytest tests/ -q                          # 全量测试(264 个)
+python3 -m pytest tests/ -q                          # 全量测试(265 个)
 python3 -m pytest tests/test_engine.py -q            # 单文件
 python3 -m pytest tests/test_dca.py::test_strategy_yaml -q   # 单测试
 
