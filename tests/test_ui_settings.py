@@ -12,6 +12,7 @@ from pathlib import Path
 from sinan.config import ExecutionCfg, RiskCfg, Settings
 
 PAGE = Path(__file__).resolve().parents[1] / "ui" / "settings_page.py"
+LIVE_PAGE = Path(__file__).resolve().parents[1] / "ui" / "live_profiles.py"
 SRC = PAGE.read_text(encoding="utf-8")
 
 #: 这些键的表单缺省必须来自模型。qmt_rpc 不在此列:它不是 pydantic 子模型
@@ -26,6 +27,19 @@ MODEL_BACKED = {
 
 def test_page_parses():
     ast.parse(SRC)
+
+
+def test_settings_page_has_system_and_live_profile_tabs():
+    assert 'st.tabs(["系统设置", "实盘配置"])' in SRC
+    assert "render_live_profiles_page" in SRC
+    assert LIVE_PAGE.exists()
+    ast.parse(LIVE_PAGE.read_text(encoding="utf-8"))
+
+
+def test_settings_page_no_longer_edits_inline_qmt():
+    assert "配置全局 QMT 执行参数" not in SRC
+    assert 'out["live"]' not in SRC
+    assert "qmt_rpc" in SRC
 
 
 def test_no_literal_defaults_for_model_backed_fields():

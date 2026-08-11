@@ -1,7 +1,8 @@
-"""设置页:全局 config/settings.yaml 界面化编辑(常用项表单 + 高级 YAML)。
+"""设置页:系统设置与可复用实盘配置。
 
-只编辑全局配置;策略级参数在『策略配置』页。控件 key 绑定文件内容指纹
-(与策略配置页同一机制),防止外部改动后旧控件状态在保存时回写。
+系统设置编辑 config/settings.yaml;实盘配置编辑 config/live_profiles.yaml。
+策略级参数在『策略配置』页。控件 key 绑定文件内容指纹,防止外部改动后
+旧控件状态在保存时回写。
 """
 import hashlib
 
@@ -10,6 +11,7 @@ import yaml
 
 from sinan.config import ExecutionCfg, RiskCfg, Settings
 from ui.common import ROOT, enum_ix, num_or
+from ui.live_profiles import render_live_profiles_page
 
 SET_PATH = ROOT / "config" / "settings.yaml"
 
@@ -23,8 +25,16 @@ _DEF_RISK = RiskCfg().model_dump()
 
 def page():
     st.subheader("设置")
-    st.caption("全局配置(config/settings.yaml):本金、执行、风控、实盘、通知。"
-               "路径类配置(数据仓/targets/报告目录)建议保持默认,如需修改用高级模式。")
+    system_tab, live_tab = st.tabs(["系统设置", "实盘配置"])
+    with system_tab:
+        _render_system_settings()
+    with live_tab:
+        render_live_profiles_page()
+
+
+def _render_system_settings():
+    st.caption("全局配置(config/settings.yaml):本金、执行、风控、数据源、通知。"
+               "路径类配置建议保持默认,如需修改用高级模式。")
     raw = SET_PATH.read_text(encoding="utf-8")
     d = yaml.safe_load(raw) or {}
     fkey = hashlib.md5(raw.encode()).hexdigest()[:8]
@@ -95,54 +105,7 @@ def page():
                  "(仅提示不阻断)。别设太紧:价格漂移本身就会造成权重偏差"))
         out["risk"] = rk
 
-        st.markdown("**实盘设置(live)**")
-        lv = dict(d.get("live") or {})
-        lq = dict(lv.get("qmt") or {})
-        la = dict(lq.get("algo") or {})
-        lv["engine"] = st.selectbox(
-            "engine(默认实盘引擎)", eng_opts := ["qmt"],
-            index=enum_ix(eng_opts, lv.get("engine"), "qmt"), key=f"set_{fkey}_le",
-            help="targets 的执行通道;当前仅支持 QMT 薄壳(文件桥接),预留扩展")
-        # 启用开关:不启用则保持 qmt 为空,targets 不带 qmt 字段、薄壳用自己的
-        # 缺省算法(随薄壳 LOT 联动)。无此开关时,任何一次表单保存都会把空配置
-        # 静默固化成当前界面值——把"跟随薄壳缺省"悄悄换成"锁死本地快照"
-        use_qmt = st.checkbox(
-            "配置全局 QMT 执行参数(不勾选 = 交由 QMT 薄壳内置缺省)",
-            value=bool(lq), key=f"set_{fkey}_lqon")
-        if use_qmt:
-            acct = st.text_input(
-                "qmt.account(资金账号,空=用 QMT 侧绑定账号)",
-                lq.get("account", ""), key=f"set_{fkey}_lacct",
-                help="当前薄壳按 QMT 绑定账号下单,此字段仅随 targets 留痕"
-                     "(多账号扩展预留);推荐留空")
-            a1, a2, a3 = st.columns(3)
-            la["quote_mode"] = a1.selectbox(
-                "qmt.algo.quote_mode(报价方式)", qm_opts := ["latest", "limit"],
-                index=enum_ix(qm_opts, la.get("quote_mode"), "latest"),
-                key=f"set_{fkey}_lqm",
-                help="latest=最新价市价单;limit=限价单(带偏移)")
-            la["price_offset"] = float(a2.number_input(
-                "qmt.algo.price_offset(限价偏移)",
-                value=num_or(la.get("price_offset"), 0.002, float), step=0.001,
-                format="%.3f", key=f"set_{fkey}_lpo",
-                help="限价单相对最新价的让价比例:买挂高、卖挂低"))
-            la["max_order_qty"] = int(a3.number_input(
-                "qmt.algo.max_order_qty(单笔拆单上限,股)",
-                value=num_or(la.get("max_order_qty"), 10000, int), step=1000,
-                key=f"set_{fkey}_lmq", help="超过则拆成多笔委托"))
-            if acct.strip():
-                lq["account"] = acct.strip()
-            else:
-                lq.pop("account", None)
-            lq["algo"] = la
-            lv["qmt"] = lq
-        else:
-            lv["qmt"] = {}
-        out["live"] = lv
-        st.caption("全局缺省:策略 YAML 未配置 qmt 时,targets 携带此处配置;"
-                   "策略级 qmt(策略配置页)**整体覆盖**此处,不做键级合并。")
-
-        st.markdown("**实盘设置 · QMT 远端接口(qmt_rpc)**")
+        st.markdown("**QMT 远端接口(qmt_rpc)**")
         qr = dict(d.get("qmt_rpc") or {})
         q1, q2, q3 = st.columns(3)
         qr["host"] = q1.text_input(
