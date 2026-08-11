@@ -23,8 +23,15 @@ def test_builtin_sources_registered():
         assert n in names
 
 
-def test_qmt_source_unavailable_off_trading_machine():
-    # 研究机无 rpc_server:构造必须抛 DataSourceError,由 build_sources 降级
+def test_qmt_source_unavailable_off_trading_machine(monkeypatch):
+    # 连接失败时构造必须抛 DataSourceError,由 build_sources 降级。
+    # 不依赖“运行测试的机器一定没开 rpc_server”——开发机可能正连着 QMT。
+    from qmt_shell import qmt_sdk
+
+    def _offline():
+        raise ConnectionError("offline probe")
+
+    monkeypatch.setattr(qmt_sdk, "connect_from_settings", _offline)
     with pytest.raises(DataSourceError):
         create_source("qmt")
     srcs = build_sources(["qmt", "akshare"])   # qmt 降级,akshare 顶上
