@@ -6,13 +6,16 @@
 """
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 from typing import Literal
 
 import copy
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (BaseModel, ConfigDict, Field, field_validator,
+                      model_validator)
 
 # 项目根 = trend/(本文件在 trend/trend/config.py)
 ROOT = Path(__file__).resolve().parent.parent
@@ -45,25 +48,73 @@ class RiskCfg(BaseModel):
     reconcile_tolerance: float = 0.02
 
 
-class LiveCfg(BaseModel):
-    """实盘设置(系统级缺省)。
+class QmtAlgoCfg(BaseModel):
+    """QMT 下单算法参数;命名实盘配置是唯一编辑入口。"""
 
-    engine: 默认实盘引擎。当前仅 qmt(QMT 薄壳文件桥接);字段本身是
-        扩展缝——未来接入其他券商/柜台时在此登记并按值派发。
-    qmt: 全局 QMT 执行配置,与策略级 StrategyCfg.qmt 同构(account/algo)。
-        sinan 不解释其语义、额外键原样透传薄壳,但 algo 的三个约定键要做
-        类型校验(见 check_qmt)——坏值留到 14:45 才炸会瘫痪当日全部策略。
-        策略未配置 qmt 时整体生效;策略配置了则整体让位,见 resolve_qmt。
+    model_config = ConfigDict(extra="forbid")
+
+    quote_mode: Literal["latest", "limit"] = "latest"
+    price_offset: float = Field(default=0.002, ge=0, allow_inf_nan=False)
+    max_order_qty: int = Field(default=10000, gt=0)
+
+
+class QmtExecutionCfg(BaseModel):
+    """QMT 执行参数。
+
+    account 当前仅随 targets 留痕,薄壳仍按 QMT 模型绑定账号下单;保留该键
+    是为未来多账号路由扩展,界面必须如实提示这一点。
     """
-    engine: Literal["qmt"] = "qmt"
-    qmt: dict = Field(default_factory=dict)
 
-    @field_validator("qmt", mode="before")
+    model_config = ConfigDict(extra="forbid")
+
+    account: str | None = None
+    algo: QmtAlgoCfg = Field(default_factory=QmtAlgoCfg)
+
+    @field_validator("account", mode="before")
     @classmethod
-    def _none_as_empty(cls, v):
-        # YAML 里写 `qmt:`(无值)解析为 None:按"未配置"处理而不是崩掉加载,
-        # 否则一个手滑的空行会让 run_signal/nightly/面板全线不可用
-        return {} if v is None else v
+    def _blank_account_as_none(cls, value):
+        if value is None:
+            return None
+        value = str(value).strip()
+        return value or None
+
+
+class LiveProfileCfg(BaseModel):
+    """一份可被多个策略引用的实盘配置。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    engine: Literal["qmt"] = "qmt"
+    qmt: QmtExecutionCfg = Field(default_factory=QmtExecutionCfg)
+
+    @field_validator("name")
+    @classmethod
+    def _non_empty_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("name 不能为空")
+        return value
+
+
+class LiveProfilesCfg(BaseModel):
+    """config/live_profiles.yaml 的完整内容。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default: str
+    profiles: dict[str, LiveProfileCfg]
+
+    @model_validator(mode="after")
+    def _validate_ids_and_default(self):
+        if not self.profiles:
+            raise ValueError("实盘配置不能为空")
+        for profile_id in self.profiles:
+            if not re.fullmatch(r"[a-z][a-z0-9_-]*", profile_id):
+                raise ValueError(f"实盘配置 ID 不合法:{profile_id!r}")
+        if self.default not in self.profiles:
+            raise ValueError(f"default 指向不存在的实盘配置:{self.default}")
+        return self
 
 
 class DataCfg(BaseModel):
@@ -93,13 +144,6 @@ class Settings(BaseModel):
     # 远端 QMT rpc_server 连接参数(host/port/timeout,非机密);
     # token 存 ~/.qmt_rpc_token(机密,严禁入库),qmt_sdk.connect_from_settings 读取
     qmt_rpc: dict = Field(default_factory=dict)
-    live: LiveCfg = Field(default_factory=LiveCfg)
-
-    @field_validator("live", mode="before")
-    @classmethod
-    def _live_none_as_default(cls, v):
-        return {} if v is None else v
-
     execution: ExecutionCfg = Field(default_factory=ExecutionCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)
     data: DataCfg = Field(default_factory=DataCfg)
@@ -120,6 +164,8 @@ class Settings(BaseModel):
 class StrategyCfg(BaseModel):
     """一份策略 = 一个 YAML(config/strategies/*.yaml)。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str                       # 实例名,用于 targets 留痕
     # 展示名(纯 UI 用途,不参与 targets/报告等任何留痕契约);
     # None = 界面回退显示配置文件名
@@ -134,71 +180,41 @@ class StrategyCfg(BaseModel):
     # 再平衡带宽覆盖:None = 用全局 execution.rebalance_band。
     # 定投类策略单期增量小(如 1.3%),须低于默认 2% 带宽才能成交
     rebalance_band: float | None = None
-    # QMT 执行配置(可选):原样嵌入 targets payload 的 "qmt" 字段供薄壳读取,
-    # sinan 不解释其内容——每个策略可绑定不同账号与下单算法。约定键:
-    #   account: 资金账号(当前薄壳按 QMT 绑定账号下单,此键仅随 targets
-    #            留痕,多账号扩展预留;推荐留空)
-    #   algo: {quote_mode: latest|limit, price_offset: 0.002,
-    #          max_order_qty: 10000}  # 报价方式/限价偏移/单笔拆单上限
-    # None = 用全局 settings.live.qmt;配置了则整体覆盖全局(见 resolve_qmt)
-    qmt: dict | None = None
+    # 命名实盘配置引用(config/live_profiles.yaml);仓库策略 YAML 显式写出,
+    # 模型默认值供测试/程序化创建策略时使用。引用不存在时出信号直接拒绝。
+    live_profile: str = "local_qmt"
     params: dict = Field(default_factory=dict)
 
 
-# algo 的三个约定键与其类型转换器;额外键不校验、原样透传薄壳
-_ALGO_TYPES = {"quote_mode": str, "price_offset": float, "max_order_qty": int}
-_QUOTE_MODES = ("latest", "limit")
+def resolve_live_profile(
+    profiles: LiveProfilesCfg,
+    cfg: StrategyCfg,
+) -> tuple[str, LiveProfileCfg]:
+    """解析策略的命名实盘配置;悬空引用直接拒绝,不回退默认配置。"""
+    profile_id = str(cfg.live_profile or "").strip()
+    if not profile_id or profile_id not in profiles.profiles:
+        raise ValueError(f"策略 {cfg.name} 引用了不存在的实盘配置:{profile_id!r}")
+    return profile_id, copy.deepcopy(profiles.profiles[profile_id])
 
 
-def check_qmt(qmt: dict, *, source: str) -> None:
-    """对 qmt.algo 的约定键做宽校验,坏值在出 targets 时就拒绝。
-
-    "sinan 不解释 qmt 内容"是指不干预语义(额外键照单全收),不等于放任
-    类型错误穿透:薄壳 do_rebalance 对 float(price_offset) 无逐策略兜底,
-    一个 "0.2%" 会让 14:45 当日**全部**策略的调仓中断。宁可现在拒绝生成,
-    也不要空仓之外的意外——与 targets 时效校验同一条原则。
-    """
-    algo = qmt.get("algo")
-    if algo is None:
-        return
-    if not isinstance(algo, dict):
-        raise ValueError(f"{source} 的 qmt.algo 必须是字典,得到 {type(algo).__name__}")
-    for key, caster in _ALGO_TYPES.items():
-        if key not in algo:
-            continue
-        try:
-            caster(algo[key])
-        except (TypeError, ValueError) as e:
-            raise ValueError(
-                f"{source} 的 qmt.algo.{key} 无法解析为 {caster.__name__}: "
-                f"{algo[key]!r}") from e
-    mode = algo.get("quote_mode")
-    if mode is not None and str(mode) not in _QUOTE_MODES:
-        raise ValueError(
-            f"{source} 的 qmt.algo.quote_mode 未知取值 {mode!r},"
-            f"可选 {'/'.join(_QUOTE_MODES)}(薄壳会静默落回市价单)")
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """YAML 映射重复键必须报错,避免同名配置被后一个静默覆盖。"""
 
 
-def resolve_qmt(settings: Settings, cfg: StrategyCfg) -> dict | None:
-    """QMT 执行配置解析:策略级整体覆盖全局(不做键级合并)。
+def _construct_unique_mapping(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError(f"YAML 重复键:{key}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
 
-    策略 YAML 配了非空 qmt → 用策略的——不与全局拼接,避免"账号来自
-    全局、算法来自策略"的隐式组合在下单场景造成误判;未配置(None)或
-    显式空 dict → 用全局 settings.live.qmt(系统设置·实盘设置);
-    两者皆空 → None,targets 不写 qmt 字段,薄壳退回其内置缺省
-    (运行环境账号 + ALGO_DEFAULT)。
 
-    注:`qmt: {}` 与不写该键等价(都表示"没有策略级配置"),策略没有
-    "屏蔽全局、强制用薄壳缺省"这一档——需要时把全局配置清空即可。
-    返回深拷贝:调用方对结果(含嵌套 algo)的任何改动都不回写配置对象。
-    """
-    if cfg.qmt:
-        check_qmt(cfg.qmt, source=f"策略 {cfg.name}")
-        return copy.deepcopy(cfg.qmt)
-    if settings.live.qmt:
-        check_qmt(settings.live.qmt, source="全局实盘设置 live.qmt")
-        return copy.deepcopy(settings.live.qmt)
-    return None
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
 
 
 def _load_yaml(path: Path) -> dict:
@@ -218,3 +234,37 @@ def load_rules(path: str | Path | None = None) -> dict:
 
 def load_strategy(path: str | Path) -> StrategyCfg:
     return StrategyCfg(**_load_yaml(Path(path)))
+
+
+def load_live_profiles(path: str | Path | None = None) -> LiveProfilesCfg:
+    """加载命名实盘配置;相比普通 YAML 加载额外拒绝重复键。"""
+    p = Path(path) if path else ROOT / "config" / "live_profiles.yaml"
+    with open(p, encoding="utf-8") as f:
+        data = yaml.load(f, Loader=_UniqueKeyLoader) or {}
+    return LiveProfilesCfg(**data)
+
+
+def save_live_profiles(
+    cfg: LiveProfilesCfg,
+    path: str | Path | None = None,
+) -> Path:
+    """原子保存命名实盘配置;失败时原文件保持不变。"""
+    p = Path(path) if path else ROOT / "config" / "live_profiles.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    text = yaml.safe_dump(
+        cfg.model_dump(mode="json", exclude_none=True),
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
+    )
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        tmp.replace(p)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return p
