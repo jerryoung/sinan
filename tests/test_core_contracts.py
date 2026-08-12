@@ -59,6 +59,20 @@ def test_store_adjust(store):
     assert np.allclose(out["open"], (out["close_raw"] - 0.05) * 2.0)
 
 
+def test_store_lists_symbols_from_actual_bar_partitions(store):
+    """行情目录以实际 bars 为准,不能依赖可能缺失或滞后的 instruments。"""
+    store.write_bars(_bars("000001", pd.date_range("2024-01-01", periods=3)),
+                     "stock")
+    store.write_bars(_bars("510300", pd.date_range("2024-01-01", periods=2)),
+                     "etf")
+
+    got = store.list_bar_symbols().set_index("symbol")
+
+    assert got.loc["000001", "sec_type"] == "stock"
+    assert got.loc["000001", "n_rows"] == 3
+    assert got.loc["510300", "sec_type"] == "etf"
+
+
 def test_store_small_tables(store):
     store.upsert_instruments(pd.DataFrame({
         "symbol": ["510300", "600519"], "name": ["沪深300ETF", "贵州茅台"],

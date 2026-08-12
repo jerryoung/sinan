@@ -12,7 +12,7 @@
     品种主数据 / 转债条款  不提供——抛 DataSourceError 交链上其他源补
       (低频主数据公网源足够,让本源保持薄;抛出即触发 run_daily 逐调用切源)
 
-连接参数:host/port 读 settings.qmt_rpc,token 读 ~/.qmt_rpc_token
+连接参数:host/port 读默认实盘配置的 qmt.rpc,token 读 ~/.qmt_rpc_token
 (机密,严禁入库/日志——异常文本不携带连接细节)。
 """
 from __future__ import annotations

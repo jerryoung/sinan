@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
+from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -14,8 +16,7 @@ from sinan.config import (load_live_profiles, load_settings, load_strategy,
 from sinan.live import ledger
 from ui.common import (NAV_COLOR, ROOT, confirm_delete, current_sel,
                        etf_names, get_store, show_targets, targets_files)
-from ui.theme import (metric_strip, page_header, section_title, status_kv,
-                      workflow_bar)
+from ui.theme import lifecycle_status, metric_strip, page_header, section_title
 
 _MODE = {
     "real": "实盘运行",
@@ -45,6 +46,16 @@ def _latest_target(strategy: str) -> tuple[list, dict | None]:
         return files, None
 
 
+def _latest_backtest_date(strategy: str, reports_dir: Path) -> str:
+    """从最新报告文件名提取回测结束日；没有报告时如实显示未验证。"""
+    reports = sorted(reports_dir.glob(f"{strategy}_*.html"),
+                     key=lambda path: path.stat().st_mtime, reverse=True)
+    if not reports:
+        return "尚无已归档回测"
+    dates = re.findall(r"\d{4}-\d{2}-\d{2}", reports[0].stem)
+    return f"最新回测：{dates[-1]}" if dates else f"报告：{reports[0].name}"
+
+
 def _run_update(strategy_path) -> None:
     with st.spinner("拉数 → 质检 → 出信号（约 1～2 分钟）…"):
         result = subprocess.run(
@@ -64,7 +75,7 @@ def _run_update(strategy_path) -> None:
 
 def _render_research(nav: pd.Series, stats: dict) -> None:
     with st.container(border=True):
-        section_title("组合净值与回撤研究")
+        section_title("净值曲线（影子）")
         metric_strip([
             ("累计收益", _fmt(stats["cum"]), "danger" if stats["cum"] < 0 else "success"),
             ("年化收益", _fmt(stats["annual"]), "danger" if stats["annual"] < 0 else "success"),
@@ -82,7 +93,7 @@ def _render_research(nav: pd.Series, stats: dict) -> None:
             hovertemplate="%{x|%Y-%m-%d}<br>%{y:.2f}%<extra></extra>",
         ))
         figure.update_layout(
-            height=270,
+            height=190,
             margin={"l": 8, "r": 8, "t": 6, "b": 8},
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
@@ -121,7 +132,7 @@ def _render_research(nav: pd.Series, stats: dict) -> None:
 
 def _render_holdings(*, live: bool, fills: list[dict], target: dict | None,
                      settings, names: dict) -> int:
-    section_title("持仓详情")
+    section_title("持仓明细（实盘）" if live else "持仓明细（影子）")
     if live:
         last = fills[-1]
         positions = last.get("positions") or {}
@@ -164,48 +175,6 @@ def _render_holdings(*, live: bool, fills: list[dict], target: dict | None,
 
     st.info("尚无 targets，请从右侧运行数据更新与信号生成。")
     return 0
-
-
-def _render_decision_rail(*, live: bool, fills: list[dict], stats: dict,
-                          target: dict | None, profile_id: str, profile,
-                          settings, position_count: int, strategy_path) -> None:
-    with st.container(border=True):
-        section_title("运行状态")
-        mode = (_MODE.get(str(fills[-1].get("trade_mode", "unknown")),
-                          "实盘运行") if live else "影子运行中")
-        status_kv("当前模式", mode, tone="success" if live else "primary")
-        status_kv("数据来源", "QMT 回报" if live else "targets 影子重放")
-        if live:
-            status_kv("资金账号", fills[-1].get("account", "—"))
-
-    with st.container(border=True):
-        section_title("数据概况")
-        status_kv("数据截止", str((target or {}).get("data_cutoff", "—"))[:10])
-        status_kv("执行日", (target or {}).get("date", "—"))
-        generated = str((target or {}).get("generated_at", "—")).replace("T", " ")
-        status_kv("targets 生成", generated[:16])
-
-    with st.container(border=True):
-        section_title("实盘配置")
-        status_kv("配置名称", profile.name)
-        status_kv("配置 ID", profile_id, tone="primary")
-        status_kv("实盘引擎", profile.engine)
-        status_kv("报价方式", profile.qmt.algo.quote_mode)
-
-    with st.container(border=True):
-        section_title("风险概览")
-        status_kv("最大回撤", _fmt(stats.get("mdd")),
-                  tone="danger" if stats.get("mdd", 0) < 0 else "")
-        status_kv("单标的上限", f"{settings.risk.max_weight_per_symbol:.0%}")
-        status_kv("总仓位上限", f"{settings.risk.max_total_weight:.0%}")
-        max_positions = settings.risk.max_positions
-        position_text = (f"{position_count} / {max_positions}"
-                         if max_positions else f"{position_count} / 不限")
-        status_kv("持仓数量", position_text)
-
-    if st.button("更新数据并生成 targets", type="primary",
-                 width="stretch", key="shadow_update_targets"):
-        _run_update(strategy_path)
 
 
 def _render_history(*, live: bool, fills: list[dict], target_files: list,
@@ -272,40 +241,43 @@ def page() -> None:
     target_files, latest_target = _latest_target(strategy_name)
 
     page_header("策略看板")
-    workflow_bar("live")
+
+    status_col, action_col = st.columns([4.8, 1.25], gap="large",
+                                        vertical_alignment="center")
+    with status_col:
+        data_cutoff = str((latest_target or {}).get("data_cutoff", "—"))[:10]
+        mode = (_MODE.get(str(fills[-1].get("trade_mode", "unknown")),
+                          "实盘运行") if live else "影子运行中")
+        lifecycle_status([
+            ("策略已更新", f"最新数据：{data_cutoff}", "success"),
+            ("回测已验证", _latest_backtest_date(strategy_name,
+                                                 settings.reports_dir), "success"),
+            (mode, f"实盘配置：{profile.name} ({profile_id})", "primary"),
+        ])
+    with action_col:
+        if st.button("更新数据并生成 targets", type="primary",
+                     width="stretch", key="shadow_update_targets"):
+            _run_update(strategy_path)
+        generated = str((latest_target or {}).get("generated_at", "—")).replace("T", " ")
+        st.caption(f"上次生成：{generated[:16]}")
 
     nav = (ledger.live_nav(fills) if live
            else _shadow_nav_cached(strategy_name, len(target_files)))
     stats = ledger.perf_stats(nav)
     names = etf_names()
 
-    analysis_col, rail_col = st.columns([3.35, 1], gap="medium")
-    with analysis_col:
-        if stats:
-            _render_research(nav, stats)
-        else:
-            st.info("跟踪数据不足，需要至少两个交易日净值。生成 targets 并跟踪"
-                    "几天后，这里会显示收益与回撤。")
-        position_count = _render_holdings(
-            live=live,
-            fills=fills,
-            target=latest_target,
-            settings=settings,
-            names=names,
-        )
-
-    with rail_col:
-        _render_decision_rail(
-            live=live,
-            fills=fills,
-            stats=stats or {},
-            target=latest_target,
-            profile_id=profile_id,
-            profile=profile,
-            settings=settings,
-            position_count=position_count,
-            strategy_path=strategy_path,
-        )
+    if stats:
+        _render_research(nav, stats)
+    else:
+        st.info("跟踪数据不足，需要至少两个交易日净值。生成 targets 并跟踪"
+                "几天后，这里会显示收益与回撤。")
+    _render_holdings(
+        live=live,
+        fills=fills,
+        target=latest_target,
+        settings=settings,
+        names=names,
+    )
 
     section_title("运行记录")
     _render_history(

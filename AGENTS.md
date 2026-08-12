@@ -74,7 +74,8 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   只有 `config/live_profiles.yaml` 一个事实来源:策略以 `live_profile` 引用 ID,
   `resolve_live_profile` 解析为 QMT 参数;引用不存在直接拒绝出 targets,**不得**
   回退默认配置。配置 ID 创建后不可改;默认配置或被策略引用的配置禁止删除。
-  `qmt_rpc` 是系统连接参数,留在 settings.yaml,不属于策略实盘配置。
+  QMT RPC 连接参数属于命名实盘配置的 `qmt.rpc`;QMT 数据源读取默认实盘配置,
+  策略执行读取策略引用配置;RPC 参数不进入 targets,token 只存用户目录。
 - **特例语义**:dca 的 `params.start` 在回测中改用窗口首日(配置值只锚定影子/
   实盘计划)——由策略在 `@register("dca", window_anchored_params=("start",))`
   **自声明**,`call_strategy` 统一改写,引擎不认识任何具体策略名;xsmom 逐日

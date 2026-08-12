@@ -239,6 +239,78 @@ a { color: #89A2FF; }
   opacity: .66;
 }
 
+.sn-lifecycle {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  min-height: 70px;
+  margin: 0 0 1rem;
+}
+
+.sn-lifecycle__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: .7rem;
+  min-width: 0;
+}
+
+.sn-lifecycle__item:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 17px;
+  right: 1rem;
+  width: clamp(28px, 6vw, 96px);
+  height: 1px;
+  background: var(--sn-border);
+}
+
+.sn-lifecycle__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: #FFFFFF;
+  background: #1E743F;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+}
+
+.sn-lifecycle__icon .material-symbols-rounded {
+  font-family: "Material Symbols Rounded";
+  font-size: 18px;
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: "liga";
+  -webkit-font-feature-settings: "liga";
+}
+.sn-lifecycle__item.is-primary .sn-lifecycle__icon {
+  color: #AFC0FF;
+  background: #173D76;
+  box-shadow: inset 0 0 0 1px #4B82E8, 0 0 12px rgba(75,130,232,.2);
+}
+.sn-lifecycle__title {
+  color: var(--sn-text);
+  font-size: .92rem;
+  font-weight: 620;
+}
+.sn-lifecycle__detail {
+  margin-top: .18rem;
+  color: var(--sn-text-muted);
+  font-size: .74rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sn-section-title {
   color: var(--sn-text);
   font-size: 1rem;
@@ -338,6 +410,11 @@ div[data-testid="column"]:last-child div[data-testid="stMetric"] {
   font-weight: 560;
 }
 
+.stButton button p,
+.stDownloadButton button p {
+  color: inherit;
+}
+
 .stButton > button:hover,
 .stDownloadButton > button:hover {
   border-color: #6E8BFF;
@@ -356,15 +433,15 @@ div[data-testid="column"]:last-child div[data-testid="stMetric"] {
   background: #6B88FC;
 }
 
-/* 生成实盘指令属于高关注操作，沿用选定方案的珊瑚色强调。 */
+/* 方案 1 使用单一蓝色主操作，避免把正常更新误读为危险动作。 */
 .st-key-shadow_update_targets button[kind="primary"] {
-  border-color: var(--sn-danger);
-  background: var(--sn-danger);
+  border-color: var(--sn-primary);
+  background: var(--sn-primary);
 }
 
 .st-key-shadow_update_targets button[kind="primary"]:hover {
-  border-color: #F47A80;
-  background: #F06A71;
+  border-color: #7894FF;
+  background: #6B88FC;
 }
 
 button:focus-visible, input:focus-visible, textarea:focus-visible,
@@ -436,6 +513,8 @@ code, pre {
 @media (max-width: 760px) {
   .sn-workflow__en { display: none; }
   .sn-page-header__title { font-size: 1.3rem; }
+  .sn-lifecycle { grid-template-columns: 1fr; gap: .65rem; }
+  .sn-lifecycle__item:not(:last-child)::after { display: none; }
 }
 </style>
 """
@@ -481,6 +560,24 @@ def workflow_bar(active: str) -> None:
             "</div>"
         )
     st.markdown('<div class="sn-workflow">' + "".join(items) + "</div>",
+                unsafe_allow_html=True)
+
+
+def lifecycle_status(items: list[tuple[str, str, str]]) -> None:
+    """方案 1 的核心运行链：策略更新、回测验证、影子/实盘运行。"""
+    cells = []
+    for title, detail, tone in items:
+        tone_class = " is-primary" if tone == "primary" else ""
+        icon = "radio_button_checked" if tone == "primary" else "check"
+        cells.append(
+            f'<div class="sn-lifecycle__item{tone_class}">'
+            '<div class="sn-lifecycle__icon">'
+            f'<span class="material-symbols-rounded">{icon}</span></div>'
+            '<div><div class="sn-lifecycle__title">'
+            f'{escape(title)}</div><div class="sn-lifecycle__detail">'
+            f'{escape(detail)}</div></div></div>'
+        )
+    st.markdown('<div class="sn-lifecycle">' + "".join(cells) + "</div>",
                 unsafe_allow_html=True)
 
 

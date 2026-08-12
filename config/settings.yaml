@@ -14,11 +14,6 @@ data:                         # 日更数据源链:[主源, 备源, ...],按序�
                               # 非 QMT 机器)自动降级跳过;全部不可用则当日中止。
                               # qmt 源(RPC 直连交易机行情)仅交易机可用,需要时加在首位。
 
-qmt_rpc:                      # 远端 QMT RPC 连接(系统能力,不属于策略实盘配置)
-  host: 127.0.0.1             # SSH 隧道保持本机;Tailscale 填交易机 100.x IP
-  port: 58620                 # 与 qmt_shell/sinan_qmt.py 的 RPC_PORT 一致
-  timeout: 15.0               # token 读 ~/.qmt_rpc_token,严禁写入仓库
-
 execution:
   price_mode: close           # 回测执行价:close(与实盘 14:45 执行近似对齐)| open
   rebalance_band: 0.02        # |目标−当前| 权重差小于此值不调仓,抑制漂移磨损

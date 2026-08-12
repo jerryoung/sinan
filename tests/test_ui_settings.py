@@ -16,8 +16,7 @@ LIVE_PAGE = Path(__file__).resolve().parents[1] / "ui" / "live_profiles.py"
 COMMON_PAGE = Path(__file__).resolve().parents[1] / "ui" / "common.py"
 SRC = PAGE.read_text(encoding="utf-8")
 
-#: 这些键的表单缺省必须来自模型。qmt_rpc 不在此列:它不是 pydantic 子模型
-#: (Settings.qmt_rpc 是自由 dict),缺省只能写在界面上。
+#: 这些键的表单缺省必须来自模型。QMT RPC 已归入命名实盘配置。
 MODEL_BACKED = {
     **RiskCfg().model_dump(),
     **ExecutionCfg().model_dump(),
@@ -40,7 +39,14 @@ def test_settings_page_has_system_and_live_profile_tabs():
 def test_settings_page_no_longer_edits_inline_qmt():
     assert "配置全局 QMT 执行参数" not in SRC
     assert 'out["live"]' not in SRC
-    assert "qmt_rpc" in SRC
+    assert "qmt_rpc" not in SRC
+
+
+def test_live_profile_page_edits_qmt_rpc_connection():
+    source = LIVE_PAGE.read_text(encoding="utf-8")
+    assert "QmtRpcCfg" in source
+    for label in ("QMT 数据连接", "连接地址", "端口", "超时"):
+        assert label in source
 
 
 def test_settings_form_exposes_multi_source_priority():

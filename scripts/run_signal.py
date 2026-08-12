@@ -51,7 +51,7 @@ def main() -> int:
     settings = load_settings()
     cfg = load_strategy(args.strategy)
     profile_id, live_profile = resolve_live_profile(load_live_profiles(), cfg)
-    qmt_cfg = live_profile.qmt.model_dump(mode="json", exclude_none=True)
+    qmt_cfg = live_profile.qmt.targets_payload()
     store = DataStore(settings.store_root)
     today = pd.Timestamp(args.date)
 

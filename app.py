@@ -32,17 +32,19 @@ apply_theme()
 st.logo(str(BRAND_PATH), size="large", icon_image=str(LOGO_PATH))
 
 pg = st.navigation({
-    "量化策略": [
-        st.Page(shadow.page, title="策略看板", icon=":material/monitoring:", url_path="shadow",
-                default=True),
-        st.Page(backtest.page, title="回测", icon=":material/science:", url_path="backtest"),
-        st.Page(strategy_config.page, title="策略配置", icon=":material/tune:", url_path="config"),
-        st.Page(settings_page.page, title="设置", icon=":material/settings:", url_path="settings"),
-    ],
-    "数据中心": [
+    "数据": [
         st.Page(quotes.page, title="行情查询", icon=":material/candlestick_chart:", url_path="quotes"),
         st.Page(warehouse.page, title="数据仓概况", icon=":material/database:", url_path="warehouse"),
         st.Page(updater.page, title="数据更新", icon=":material/sync:", url_path="update"),
+    ],
+    "回测与实盘": [
+        st.Page(shadow.page, title="策略看板", icon=":material/monitoring:", url_path="shadow",
+                default=True),
+        st.Page(backtest.page, title="回测", icon=":material/science:", url_path="backtest"),
+    ],
+    "策略与设置": [
+        st.Page(strategy_config.page, title="策略配置", icon=":material/tune:", url_path="config"),
+        st.Page(settings_page.page, title="设置", icon=":material/settings:", url_path="settings"),
     ],
 })
 

@@ -8,6 +8,8 @@ import socket
 import pytest
 
 from qmt_shell import qmt_sdk, sinan_qmt as rpc_server
+from sinan.config import (LiveProfileCfg, LiveProfilesCfg, QmtExecutionCfg,
+                          QmtRpcCfg)
 
 
 class _COS:                                     # 模拟 QMT 账户对象(m_* 属性)
@@ -137,6 +139,41 @@ def test_ip_allowlist_cidr_and_rejection():
         cli.call("anything")
     cli.close()
     srv.close()
+
+
+def test_connect_from_settings_uses_default_live_profile_rpc(monkeypatch, tmp_path):
+    import sinan.config as config_module
+
+    profiles = LiveProfilesCfg(
+        default="remote_qmt",
+        profiles={
+            "remote_qmt": LiveProfileCfg(
+                name="远端 QMT",
+                qmt=QmtExecutionCfg(
+                    rpc=QmtRpcCfg(host="100.64.0.8", port=60001, timeout=9.0),
+                ),
+            ),
+        },
+    )
+    seen = {}
+    monkeypatch.setattr(config_module, "load_live_profiles", lambda: profiles)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    monkeypatch.setattr(
+        qmt_sdk,
+        "connect",
+        lambda host, port, token, timeout: seen.update(
+            host=host, port=port, token=token, timeout=timeout
+        ),
+    )
+
+    qmt_sdk.connect_from_settings()
+
+    assert seen == {
+        "host": "100.64.0.8",
+        "port": 60001,
+        "token": "",
+        "timeout": 9.0,
+    }
 
 
 # ---------------- 多策略共账号:备注归因 + 虚拟账本 ----------------

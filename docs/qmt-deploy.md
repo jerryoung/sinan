@@ -64,7 +64,7 @@ ssh -N qmt-ecs
 
 两端安装 Tailscale 登录同一账号;`sinan_qmt.py` 的 `RPC_HOST` 改绑 ECS 的
 `100.x.y.z` 虚拟网卡 IP,并配置强 `RPC_TOKEN`(≥32 位随机)与
-`RPC_ALLOW_IPS`;本地 `settings.yaml` 的 `qmt_rpc.host` 填该 IP。
+`RPC_ALLOW_IPS`;本地“设置 → 实盘配置”默认项的“QMT 数据连接”填该 IP。
 公网不可见,私网可达。
 
 ### 方案 C:直接暴露公网端口(不推荐)
@@ -88,7 +88,7 @@ ssh -N qmt-ecs
 
 ## 三、本地侧配置(司南)
 
-1. `设置` 页(或 settings.yaml)`qmt_rpc` 段配 host/port
+1. 在`设置 → 实盘配置`选择默认配置，在“QMT 数据连接”配置 host/port
    (SSH 隧道场景就是 127.0.0.1:58620);
 2. token 写入本机 `~/.qmt_rpc_token`(单行):
 
@@ -102,7 +102,7 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))" > ~/.qmt_rpc_token
 
 ```python
 from qmt_shell import qmt_sdk as qmt
-qmt.connect_from_settings()          # 读 settings.qmt_rpc + ~/.qmt_rpc_token
+qmt.connect_from_settings()          # 读默认实盘配置 qmt.rpc + ~/.qmt_rpc_token
 accs = qmt.get_trade_detail_data("8888888888", "STOCK", "account")
 ```
 

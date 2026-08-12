@@ -10,6 +10,7 @@ from sinan.config import (
     LiveProfilesCfg,
     QmtAlgoCfg,
     QmtExecutionCfg,
+    QmtRpcCfg,
     ROOT,
     Settings,
     StrategyCfg,
@@ -69,15 +70,19 @@ def test_all_repo_strategies_explicitly_reference_existing_profile():
 
 def test_settings_no_longer_has_inline_live_qmt():
     assert "live" not in Settings.model_fields
-    assert "qmt_rpc" in Settings.model_fields
+    assert "qmt_rpc" not in Settings.model_fields
     with pytest.raises(ValidationError, match="live"):
         Settings(live={"engine": "qmt", "qmt": {}})
+    with pytest.raises(ValidationError, match="qmt_rpc"):
+        Settings(qmt_rpc={"host": "127.0.0.1"})
 
 
-def test_repo_settings_has_no_legacy_live_section_and_keeps_qmt_rpc():
+def test_repo_settings_has_no_legacy_live_or_qmt_rpc_section():
     raw = yaml.safe_load((ROOT / "config" / "settings.yaml").read_text(encoding="utf-8"))
     assert "live" not in raw
-    assert "qmt_rpc" in raw
+    assert "qmt_rpc" not in raw
+    profiles = load_live_profiles()
+    assert profiles.profiles[profiles.default].qmt.rpc.host == "127.0.0.1"
 
 
 def test_production_entrypoints_do_not_use_legacy_qmt_resolver():
@@ -126,6 +131,20 @@ def test_qmt_algo_rejects_invalid_values(algo, field):
         QmtAlgoCfg(**algo)
 
 
+@pytest.mark.parametrize(
+    "rpc,field",
+    [
+        ({"host": ""}, "host"),
+        ({"port": 0}, "port"),
+        ({"port": 70000}, "port"),
+        ({"timeout": 0}, "timeout"),
+    ],
+)
+def test_qmt_rpc_rejects_invalid_values(rpc, field):
+    with pytest.raises(ValidationError, match=field):
+        QmtRpcCfg(**rpc)
+
+
 def test_unknown_engine_and_unknown_qmt_keys_are_rejected():
     with pytest.raises(ValidationError, match="engine"):
         LiveProfileCfg(name="P", engine="ptrade")
@@ -161,7 +180,7 @@ def test_resolver_returns_profile_id_and_deep_copy():
 
 def test_resolved_profile_serializes_for_existing_qmt_shell_contract():
     profile_id, profile = resolve_live_profile(_profiles(), _strategy())
-    qmt = profile.qmt.model_dump(mode="json", exclude_none=True)
+    qmt = profile.qmt.targets_payload()
     assert profile_id == "local_qmt"
     assert qmt == {
         "algo": {
@@ -170,6 +189,7 @@ def test_resolved_profile_serializes_for_existing_qmt_shell_contract():
             "max_order_qty": 10000,
         }
     }
+    assert "rpc" not in qmt
 
 
 def test_profile_yaml_roundtrip_and_atomic_save(tmp_path):

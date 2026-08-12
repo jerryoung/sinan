@@ -1,10 +1,25 @@
 default: local_qmt
-
 profiles:
   local_qmt:
     name: 本地 QMT
     engine: qmt
     qmt:
+      rpc:
+        host: 127.0.0.1
+        port: 58620
+        timeout: 15.0
+      algo:
+        quote_mode: latest
+        price_offset: 0.002
+        max_order_qty: 10000
+  remote_qmt:
+    name: ESC QMT 配置
+    engine: qmt
+    qmt:
+      rpc:
+        host: 127.0.0.1
+        port: 58620
+        timeout: 15.0
       algo:
         quote_mode: latest
         price_offset: 0.002

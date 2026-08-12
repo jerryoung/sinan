@@ -136,6 +136,28 @@ class DataStore:
             out[c] = pd.to_datetime(out[c])
         return out[cols]
 
+    def list_bar_symbols(self) -> pd.DataFrame:
+        """从实际行情分区生成可查询标的目录。
+
+        instruments 是低频主数据,可能尚未种子化或落后于 bars;行情查询的
+        可用性必须以真实存在的 bars 为准。
+        """
+        cols = ["symbol", "sec_type", "n_rows", "min_date", "max_date"]
+        glob = str(self.root / "bars_daily" / "**" / "*.parquet")
+        if not any((self.root / "bars_daily").rglob("*.parquet")):
+            return pd.DataFrame(columns=cols)
+        sql = (
+            f"SELECT CAST(symbol AS VARCHAR) AS symbol, sec_type, "
+            f"COUNT(*) AS n_rows, MIN(date) AS min_date, MAX(date) AS max_date "
+            f"FROM read_parquet('{glob}', hive_partitioning=1, union_by_name=1) "
+            f"GROUP BY symbol, sec_type ORDER BY symbol, sec_type"
+        )
+        with duckdb.connect() as con:
+            out = con.execute(sql).df()
+        for c in ("min_date", "max_date"):
+            out[c] = pd.to_datetime(out[c])
+        return out[cols]
+
     # ------------------------------------------------------------------
     # 小表通用 upsert / read
     # ------------------------------------------------------------------

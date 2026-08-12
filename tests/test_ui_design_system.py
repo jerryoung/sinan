@@ -16,11 +16,12 @@ def _source(path: Path) -> str:
 def test_shared_theme_module_exposes_platform_primitives():
     source = _source(THEME)
     ast.parse(source)
-    for name in ("apply_theme", "page_header", "workflow_bar", "status_kv"):
+    for name in ("apply_theme", "page_header", "workflow_bar", "lifecycle_status"):
         assert f"def {name}(" in source
     for token in ("--sn-canvas", "--sn-surface", "--sn-primary",
                   "--sn-success", "--sn-warning", "--sn-danger"):
         assert token in source
+    assert 'font-family: "Material Symbols Rounded"' in source
 
 
 def test_collapsed_sidebar_keeps_reopen_control_accessible():
@@ -63,7 +64,6 @@ def test_every_page_uses_shared_page_header():
 
 def test_core_flow_pages_show_the_three_stage_workflow():
     expected = {
-        "shadow.py": 'workflow_bar("live")',
         "backtest.py": 'workflow_bar("backtest")',
         "quotes.py": 'workflow_bar("data")',
         "warehouse.py": 'workflow_bar("data")',
@@ -71,14 +71,36 @@ def test_core_flow_pages_show_the_three_stage_workflow():
     }
     for filename, call in expected.items():
         assert call in _source(ROOT / "ui" / filename), filename
+    assert "lifecycle_status(" in _source(ROOT / "ui" / "shadow.py")
 
 
-def test_strategy_dashboard_has_real_decision_rail_context():
+def test_strategy_dashboard_matches_option_one_lifecycle_workspace():
     source = _source(ROOT / "ui" / "shadow.py")
     assert "load_live_profiles" in source
     assert "resolve_live_profile" in source
-    for label in ("运行状态", "数据概况", "实盘配置", "风险概览"):
+    assert "lifecycle_status(" in source
+    assert "_render_decision_rail" not in source
+    for label in ("策略已更新", "回测已验证", "影子运行中", "持仓明细"):
         assert label in source
+    assert "height=190" in source
+
+
+def test_sidebar_uses_option_one_task_groups():
+    source = _source(APP)
+    for group in ('"数据"', '"回测与实盘"', '"策略与设置"'):
+        assert group in source
+    assert '"量化策略"' not in source
+    assert '"数据中心"' not in source
+
+
+def test_option_one_primary_action_uses_blue_token():
+    source = _source(THEME)
+    rule = source.split(".st-key-shadow_update_targets button[kind=\"primary\"]", 1)[1]
+    rule = rule.split("}", 1)[0]
+    assert "var(--sn-primary)" in rule
+    assert "var(--sn-danger)" not in rule
+    assert ".stButton button p" in source
+    assert "color: inherit" in source.split(".stButton button p", 1)[1].split("}", 1)[0]
 
 
 def test_legacy_backtest_report_gets_dark_theme_without_head_tag():

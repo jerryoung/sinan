@@ -58,6 +58,24 @@ class QmtAlgoCfg(BaseModel):
     max_order_qty: int = Field(default=10000, gt=0)
 
 
+class QmtRpcCfg(BaseModel):
+    """QMT 数据/RPC 连接参数;机密 token 仍只存用户目录。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = "127.0.0.1"
+    port: int = Field(default=58620, ge=1, le=65535)
+    timeout: float = Field(default=15.0, gt=0, allow_inf_nan=False)
+
+    @field_validator("host")
+    @classmethod
+    def _non_empty_host(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("host 不能为空")
+        return value
+
+
 class QmtExecutionCfg(BaseModel):
     """QMT 执行参数。
 
@@ -68,6 +86,7 @@ class QmtExecutionCfg(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     account: str | None = None
+    rpc: QmtRpcCfg = Field(default_factory=QmtRpcCfg)
     algo: QmtAlgoCfg = Field(default_factory=QmtAlgoCfg)
 
     @field_validator("account", mode="before")
@@ -77,6 +96,14 @@ class QmtExecutionCfg(BaseModel):
             return None
         value = str(value).strip()
         return value or None
+
+    def targets_payload(self) -> dict:
+        """生成 QMT 薄壳执行字段;RPC 网络参数不进入 targets 文件。"""
+        return self.model_dump(
+            mode="json",
+            exclude_none=True,
+            exclude={"rpc"},
+        )
 
 
 class LiveProfileCfg(BaseModel):
@@ -159,9 +186,6 @@ class Settings(BaseModel):
     fills_dir: Path = Path("var/runtime/fills")
     reports_dir: Path = Path("var/reports")
     wecom_webhook: str = ""
-    # 远端 QMT rpc_server 连接参数(host/port/timeout,非机密);
-    # token 存 ~/.qmt_rpc_token(机密,严禁入库),qmt_sdk.connect_from_settings 读取
-    qmt_rpc: dict = Field(default_factory=dict)
     execution: ExecutionCfg = Field(default_factory=ExecutionCfg)
     risk: RiskCfg = Field(default_factory=RiskCfg)
     data: DataCfg = Field(default_factory=DataCfg)

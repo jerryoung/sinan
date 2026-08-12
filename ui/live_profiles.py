@@ -5,7 +5,7 @@ import hashlib
 
 import streamlit as st
 
-from sinan.config import (LiveProfileCfg, QmtAlgoCfg, QmtExecutionCfg,
+from sinan.config import (LiveProfileCfg, QmtAlgoCfg, QmtExecutionCfg, QmtRpcCfg,
                           load_live_profiles, save_live_profiles)
 from sinan.live.profiles import (ProfileDeleteBlocked, delete_live_profile,
                                  set_default_live_profile,
@@ -108,12 +108,39 @@ def render_live_profiles_page() -> None:
         key=f"live_profile_{fkey}_{selected}_qty",
     ))
 
+    section_title("QMT 数据连接")
+    host_col, port_col, timeout_col = st.columns(3)
+    host = host_col.text_input(
+        "连接地址",
+        current.qmt.rpc.host,
+        key=f"live_profile_{fkey}_{selected}_rpc_host",
+        help="本机或 SSH 隧道用 127.0.0.1；Tailscale 填交易机地址",
+    )
+    port = int(port_col.number_input(
+        "端口",
+        min_value=1,
+        max_value=65535,
+        value=current.qmt.rpc.port,
+        step=1,
+        key=f"live_profile_{fkey}_{selected}_rpc_port",
+    ))
+    timeout = float(timeout_col.number_input(
+        "超时（秒）",
+        min_value=0.1,
+        value=current.qmt.rpc.timeout,
+        step=1.0,
+        key=f"live_profile_{fkey}_{selected}_rpc_timeout",
+    ))
+    st.caption("数据源中的 QMT 使用默认实盘配置的连接；token 仍只存本机 "
+               "~/.qmt_rpc_token，不写入配置文件。")
+
     try:
         edited = LiveProfileCfg(
             name=name,
             engine="qmt",
             qmt=QmtExecutionCfg(
                 account=account,
+                rpc=QmtRpcCfg(host=host, port=port, timeout=timeout),
                 algo=QmtAlgoCfg(
                     quote_mode=quote_mode,
                     price_offset=price_offset,

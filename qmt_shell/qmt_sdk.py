@@ -136,22 +136,22 @@ def connect(host="127.0.0.1", port=58620, token="", timeout=15.0):
 
 
 def connect_from_settings():
-    """按 sinan 配置连接远端 QMT:host/port 读 config/settings.yaml 的
-    qmt_rpc 段(非机密),token 读 ~/.qmt_rpc_token(单行;机密,严禁写进
-    仓库/配置/日志——与 ~/.tushare_token 同一纪律)。
+    """按默认实盘配置连接远端 QMT:host/port/timeout 读
+    config/live_profiles.yaml 默认项的 qmt.rpc,token 读
+    ~/.qmt_rpc_token(单行;机密,严禁写进仓库/配置/日志)。
 
     远程访问务必走 SSH 隧道或 Tailscale(见 rpc_server 安全模型);
     SSH 隧道场景 host 就是 127.0.0.1,token 仍建议配置作第二道锁。
     """
     from pathlib import Path
 
-    from sinan.config import load_settings
+    from sinan.config import load_live_profiles
 
-    cfg = dict(getattr(load_settings(), "qmt_rpc", None) or {})
+    profiles = load_live_profiles()
+    cfg = profiles.profiles[profiles.default].qmt.rpc
     tf = Path.home() / ".qmt_rpc_token"
     token = tf.read_text(encoding="utf-8").strip() if tf.exists() else ""
-    return connect(cfg.get("host", "127.0.0.1"), int(cfg.get("port", 58620)),
-                   token, float(cfg.get("timeout", 15.0)))
+    return connect(cfg.host, cfg.port, token, cfg.timeout)
 
 
 def call(fn: str, *args, **kwargs):

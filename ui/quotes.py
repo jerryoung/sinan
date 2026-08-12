@@ -2,8 +2,27 @@
 import pandas as pd
 import streamlit as st
 
-from ui.common import NAV_COLOR, etf_names, get_store, instruments_df
+from ui.common import NAV_COLOR, get_store
 from ui.theme import metric_strip, page_header, workflow_bar
+
+_SEC_LABEL = {"etf": "ETF", "stock": "个股", "cb": "转债"}
+
+
+def market_catalog(store) -> pd.DataFrame:
+    """合并真实行情目录与标的主数据;缺主数据也允许按代码查询。"""
+    bars = store.list_bar_symbols()
+    if bars.empty:
+        return pd.DataFrame(columns=["symbol", "sec_type", "name", "n_rows",
+                                     "min_date", "max_date"])
+    inst = store.read_instruments()
+    names = (inst[["symbol", "name"]].assign(
+        symbol=lambda x: x["symbol"].astype(str)
+    ).drop_duplicates("symbol", keep="last") if len(inst)
+             and {"symbol", "name"} <= set(inst.columns)
+             else pd.DataFrame(columns=["symbol", "name"]))
+    out = bars.merge(names, on="symbol", how="left")
+    out["name"] = out["name"].fillna("").astype(str)
+    return out
 
 
 def page():
@@ -11,26 +30,30 @@ def page():
                 eyebrow="Market data")
     workflow_bar("data")
     q = st.text_input("搜索标的(代码或名称片段)", "510300")
-    inst = instruments_df()
-    hits = inst[inst["symbol"].str.contains(q, na=False)
-                | inst["name"].str.contains(q, na=False)] if q else inst.head(0)
+    catalog = market_catalog(get_store())
+    hits = catalog[catalog["symbol"].str.contains(q, na=False)
+                   | catalog["name"].str.contains(q, na=False)] if q else catalog.head(0)
     if len(hits) == 0:
         st.info("无匹配标的")
         return
-    pick = st.selectbox("匹配结果", hits["symbol"].tolist(),
-                        format_func=lambda s: f"{s} {etf_names().get(s, '')}")
+    options = list(hits[["symbol", "sec_type"]].itertuples(index=False, name=None))
+    labels = {(row.symbol, row.sec_type):
+              f"{row.symbol} {row['name']} · {_SEC_LABEL.get(row.sec_type, row.sec_type)}"
+              for _, row in hits.iterrows()}
+    pick, sec_type = st.selectbox("匹配结果", options,
+                                  format_func=lambda item: labels[item])
     c1, c2, c3 = st.columns(3)
     d_start = c1.text_input("开始日期", "2024-01-01")
     d_end = c2.text_input("结束日期", pd.Timestamp.today().strftime("%Y-%m-%d"))
     adj = c3.toggle("后复权", value=True,
                     help="开=原始价×复权因子(信号口径);关=交易所原始价(执行口径)")
-    bars = get_store().read_bars(symbols=[pick], sec_type="etf",
+    bars = get_store().read_bars(symbols=[pick], sec_type=sec_type,
                                  start=d_start, end=d_end, adjust=adj)
     if bars.empty:
         st.warning("区间内无数据")
         return
     bars = bars.sort_values("date")
-    full = get_store().read_bars(symbols=[pick], sec_type="etf")
+    full = get_store().read_bars(symbols=[pick], sec_type=sec_type)
     fac = full.get("adj_factor")
     metric_strip([
         ("区间行数", f"{len(bars):,}", ""),
