@@ -23,6 +23,14 @@ def test_shared_theme_module_exposes_platform_primitives():
         assert token in source
 
 
+def test_collapsed_sidebar_keeps_reopen_control_accessible():
+    source = _source(THEME)
+    assert '[data-testid="stHeader"]' in source
+    assert "height: 0;" not in source
+    assert '[data-testid="stToolbar"],' not in source
+    assert '[data-testid="stExpandSidebarButton"]' in source
+
+
 def test_app_applies_theme_and_uses_real_icon_library():
     source = _source(APP)
     assert "apply_theme()" in source

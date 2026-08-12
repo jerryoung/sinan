@@ -37,11 +37,37 @@ html, body, [class*="css"], [data-testid="stAppViewContainer"] {
 }
 
 [data-testid="stHeader"] {
-  height: 0;
+  height: 3rem;
   background: transparent;
+  pointer-events: none;
 }
 
-[data-testid="stToolbar"], .stDeployButton, #MainMenu, footer {
+[data-testid="stHeader"] button,
+[data-testid="stExpandSidebarButton"] {
+  pointer-events: auto;
+}
+
+[data-testid="stToolbar"] {
+  background: transparent;
+  pointer-events: none;
+}
+
+[data-testid="stHeaderLogo"] {
+  display: none !important;
+}
+
+[data-testid="stExpandSidebarButton"] {
+  position: fixed;
+  top: .65rem;
+  left: .75rem;
+  z-index: 1000;
+  color: var(--sn-text);
+  background: var(--sn-surface-raised);
+  border: 1px solid var(--sn-border);
+  border-radius: var(--sn-radius);
+}
+
+.stDeployButton, #MainMenu, footer {
   display: none !important;
 }
 
