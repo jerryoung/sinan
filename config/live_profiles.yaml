@@ -12,12 +12,12 @@ profiles:
         quote_mode: latest
         price_offset: 0.002
         max_order_qty: 10000
-  remote_qmt:
-    name: ESC QMT 配置
+  my_server_qmt:
+    name: 我的服务器 QMT
     engine: qmt
     qmt:
       rpc:
-        host: 127.0.0.1
+        host: 8.155.45.134
         port: 58620
         timeout: 15.0
       algo:
