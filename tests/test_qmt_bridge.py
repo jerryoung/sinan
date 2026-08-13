@@ -32,6 +32,19 @@ def test_windows_rpc_socket_uses_exclusive_address(monkeypatch):
     )
 
 
+def test_model_restart_closes_previous_process_server(monkeypatch):
+    """QMT 模型热重启先关闭进程内上一代监听,无需重启整个客户端。"""
+    previous = Mock()
+    current = Mock()
+    monkeypatch.setattr(rpc_server.builtins, "_SINAN_RPC_SERVER", previous,
+                        raising=False)
+
+    rpc_server._replace_process_server(current)
+
+    previous.close.assert_called_once_with()
+    assert rpc_server.builtins._SINAN_RPC_SERVER is current
+
+
 class _COS:                                     # 模拟 QMT 账户对象(m_* 属性)
     def __init__(self):
         self.m_dBalance = 100000.0

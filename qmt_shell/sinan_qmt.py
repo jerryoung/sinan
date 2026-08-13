@@ -38,6 +38,7 @@ import os
 import socket
 import threading
 import traceback
+import builtins
 from datetime import datetime
 
 # ══════════════ 唯一必填:与本地同步的共享目录 ══════════════
@@ -502,6 +503,28 @@ def _make_server_socket():
     return srv
 
 
+def _process_server_lock():
+    """QMT 进程级可重入锁;模型脚本热重载后仍复用同一个注册表。"""
+    lock = getattr(builtins, "_SINAN_RPC_SERVER_LOCK", None)
+    if lock is None:
+        lock = threading.RLock()
+        setattr(builtins, "_SINAN_RPC_SERVER_LOCK", lock)
+    return lock
+
+
+def _replace_process_server(current):
+    """关闭上一代模型遗留监听,并登记当前监听。"""
+    with _process_server_lock():
+        previous = getattr(builtins, "_SINAN_RPC_SERVER", None)
+        if previous is not None and previous is not current:
+            try:
+                previous.close()
+                print("[rpc] 已关闭上一代模型遗留监听")
+            except OSError:
+                pass
+        setattr(builtins, "_SINAN_RPC_SERVER", current)
+
+
 def serve(namespace, C, host=RPC_HOST, port=RPC_PORT, token=RPC_TOKEN,
           allow_trade=RPC_ALLOW_TRADE, allow_ips=None):
     allow_ips = list(allow_ips if allow_ips is not None else RPC_ALLOW_IPS)
@@ -511,9 +534,13 @@ def serve(namespace, C, host=RPC_HOST, port=RPC_PORT, token=RPC_TOKEN,
         if not allow_ips:
             raise ValueError("非本机绑定(%s)必须配置 ALLOW_IPS 白名单"
                              "(单 IP 或 CIDR,如 100.64.0.0/10)" % host)
-    srv = _make_server_socket()
-    srv.bind((host, port))
-    srv.listen(4)
+    # 整个 QMT 客户端共享 builtins;模型热重启前先关闭旧脚本遗留的后台监听。
+    with _process_server_lock():
+        _replace_process_server(None)
+        srv = _make_server_socket()
+        srv.bind((host, port))
+        srv.listen(4)
+        _replace_process_server(srv)
 
     def _loop():
         while True:
