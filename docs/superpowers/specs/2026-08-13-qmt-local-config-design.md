@@ -47,9 +47,12 @@ Token 只允许出现在这份服务器本地 JSON 中，不允许进入脚本�
 
 1. 构造代码内安全默认值，其中共享目录仍缺省为
    `C:\sinan\var\runtime`；
-2. 从固定路径 `C:\sinan\config\qmt.json` 读取全部机器配置；
-3. 校验最终配置后启动实盘推送和 RPC；
-4. 后续修改文件，通过停止并重新启动 QMT 策略生效，无需重启整个 QMT 客户端。
+2. 若 `C:\sinan\config\qmt.json` 不存在，则自动创建父目录和默认配置文件；默认
+   保留实盘推送，但设置 `rpc.enable=false`、空 Token 和空白名单，避免首次启动时
+   暴露未鉴权端口；
+3. 从固定路径 `C:\sinan\config\qmt.json` 读取全部机器配置；
+4. 校验最终配置后启动实盘推送和 RPC；
+5. 后续修改文件，通过停止并重新启动 QMT 策略生效，无需重启整个 QMT 客户端。
 
 QMT Python 运行环境不依赖 PyYAML，因此使用标准库 JSON。脚本仍保留
 `C:\sinan\var\runtime` 作为共享目录缺省值，便于本机既有安装平滑迁移。
@@ -61,6 +64,8 @@ QMT Python 运行环境不依赖 PyYAML，因此使用标准库 JSON。脚本仍
   状态推送。
 - JSON 无法解析、字段类型错误、端口越界或白名单格式错误时，日志指出字段和配置
   文件路径，不包含 Token 内容。
+- 自动创建默认配置后，日志提示文件路径和“填写 Token、白名单并启用 RPC 后重启
+  策略”，策略当次继续运行且 RPC 保持关闭。
 - 启动日志输出生效配置路径、监听地址、白名单、交易权限和 `token_length`，便于
   排查实际读取的是哪份配置。
 - `qmt.json` 建议仅允许运行 QMT 的 Windows 用户读取。
@@ -68,8 +73,9 @@ QMT Python 运行环境不依赖 PyYAML，因此使用标准库 JSON。脚本仍
 ## 交付与迁移
 
 仓库提供无秘密的 `qmt.local.example.json` 和一次性 PowerShell 初始化命令。首次
-部署只需创建 `C:\sinan\config\qmt.json`；以后更新只替换 QMT 脚本。现有设置页
-和 macOS 侧 `~/.qmt_rpc_token` 的使用方式不变，两端 Token 内容保持一致。
+首次启动会自动创建 `C:\sinan\config\qmt.json`；部署文档说明如何编辑它。以后
+更新只替换 QMT 脚本。现有设置页和 macOS 侧 `~/.qmt_rpc_token` 的使用方式不变，
+两端 Token 内容保持一致。
 
 ## 验证
 
