@@ -159,6 +159,11 @@ def call(fn: str, *args, **kwargs):
     return _client.call(fn, *args, **kwargs)
 
 
+def health():
+    """读取 RPC 服务状态；不调用 QMT 行情或交易函数。"""
+    return call("rpc.health")
+
+
 # ---- 同名常用 API(签名与 QMT 内置一致)----------------------------------
 def passorder(op_type, order_type, account, order_code, pr_type, price,
               volume, strategy_name="", quick_trade=2, user_order_id="",

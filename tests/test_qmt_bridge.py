@@ -13,11 +13,11 @@ from sinan.config import (LiveProfileCfg, LiveProfilesCfg, QmtExecutionCfg,
                           QmtRpcCfg)
 
 
-def test_qmt_rpc_defaults_are_unconfigured_and_readonly():
-    """仓库脚本不携带用户网络信息,远端通道默认最小权限。"""
+def test_qmt_rpc_defaults_are_unconfigured_and_trade_enabled():
+    """仓库不携带用户网络信息；QMT RPC 默认开启交易能力。"""
     assert rpc_server.RPC_TOKEN == ""
     assert rpc_server.RPC_ALLOW_IPS == []
-    assert rpc_server.RPC_ALLOW_TRADE is False
+    assert rpc_server.RPC_ALLOW_TRADE is True
 
 
 def test_windows_rpc_socket_uses_exclusive_address(monkeypatch):
@@ -91,6 +91,14 @@ def test_named_api_and_cos_revival(bridge):
     accs = qmt_sdk.get_trade_detail_data("8888", "STOCK", "account")
     assert accs[0].m_dBalance == 100000.0       # m_* 属性还原,与 QMT 内一致
     assert accs[0].m_strInstrumentID == "510300"
+
+
+def test_health_reports_rpc_runtime_without_calling_qmt_api(bridge):
+    health = qmt_sdk.health()
+    assert health["service"] == "sinan-qmt-rpc"
+    assert health["protocol"] == 1
+    assert health["allow_trade"] is True
+    assert health["account_type"] == "STOCK"
 
 
 def test_context_proxy_and_passorder(bridge):

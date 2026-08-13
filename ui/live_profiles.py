@@ -7,6 +7,7 @@ import streamlit as st
 
 from sinan.config import (LiveProfileCfg, QmtAlgoCfg, QmtExecutionCfg, QmtRpcCfg,
                           load_live_profiles, save_live_profiles)
+from sinan.live.qmt_rpc import verify_qmt_rpc
 from sinan.live.profiles import (ProfileDeleteBlocked, delete_live_profile,
                                  set_default_live_profile,
                                  upsert_live_profile)
@@ -133,6 +134,36 @@ def render_live_profiles_page() -> None:
     ))
     st.caption("数据源中的 QMT 使用默认实盘配置的连接；token 仍只存本机 "
                "~/.qmt_rpc_token，不写入配置文件。")
+
+    verify_col, _ = st.columns([1, 4])
+    if verify_col.button(
+        "验证 RPC",
+        key=f"live_profile_{fkey}_{selected}_rpc_verify",
+        disabled=is_new,
+        help="验证当前表单地址、Token、QMT 服务与实时行情，不会产生委托",
+    ):
+        with st.spinner("正在验证 QMT RPC…"):
+            result = verify_qmt_rpc(
+                QmtRpcCfg(host=host, port=port, timeout=timeout)
+            )
+        if result.ready:
+            health = result.health
+            quote = result.quote
+            st.success(f"{result.message} · {result.endpoint}")
+            v1, v2, v3, v4 = st.columns(4)
+            v1.metric("运行模式", health.get("trade_mode") or "unknown")
+            v2.metric("交易权限", "已开启" if health.get("allow_trade") else "只读")
+            v3.metric("绑定账号", health.get("account") or "未识别")
+            price = quote.get("last_price")
+            v4.metric("实时行情", "—" if price is None else str(price),
+                      help=f"{quote.get('symbol')} {quote.get('name')}")
+            st.caption(f"服务 {health.get('service')} / 协议 v{health.get('protocol')}；"
+                       "验证过程未调用任何交易函数。")
+        else:
+            stage_label = {"tcp": "网络", "health": "鉴权/协议",
+                           "quote": "行情"}.get(result.stage, result.stage)
+            st.error(f"RPC 未准备就绪 · {result.endpoint} · "
+                     f"失败阶段：{stage_label} · {result.message}")
 
     try:
         edited = LiveProfileCfg(

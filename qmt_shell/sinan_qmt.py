@@ -58,7 +58,7 @@ RPC_ENABLE = True            # 关掉则只做 targets 批处理
 RPC_HOST = "0.0.0.0"         # 远程监听;必须同时填写 TOKEN 和 ALLOW_IPS
 RPC_PORT = 58620
 RPC_TOKEN = ""               # 非 127.0.0.1 绑定必须非空(≥32 位随机)
-RPC_ALLOW_TRADE = False      # 调试默认只读;targets 定时执行不受影响
+RPC_ALLOW_TRADE = True       # RPC 是否允许 passorder/cancel;公网须配白名单+TOKEN
 RPC_ALLOW_IPS = []           # 非本机绑定必须非空:单 IP 或 CIDR(100.64.0.0/10)
 
 LIVE_PUSH_ENABLE = True
@@ -421,6 +421,11 @@ def to_jsonable(obj, _depth=0):
 
 
 def dispatch(namespace, C, fn, args, kwargs, allow_trade=True):
+    if fn == "rpc.health":
+        return {"service": "sinan-qmt-rpc", "protocol": 1,
+                "account": _ACCOUNT["id"], "account_type": _ACCOUNT["type"],
+                "trade_mode": _trade_mode(C), "allow_trade": bool(allow_trade),
+                "server_time": datetime.now().isoformat(timespec="seconds")}
     if not allow_trade and fn in _TRADE_FNS:
         raise PermissionError("只读通道(RPC_ALLOW_TRADE=False),拒绝: %s" % fn)
     args = [C if a == "__C__" else a for a in (args or [])]

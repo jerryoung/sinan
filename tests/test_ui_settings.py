@@ -49,6 +49,14 @@ def test_live_profile_page_edits_qmt_rpc_connection():
         assert label in source
 
 
+def test_live_profile_page_can_verify_qmt_rpc_readiness():
+    source = LIVE_PAGE.read_text(encoding="utf-8")
+    assert "verify_qmt_rpc" in source
+    assert '"验证 RPC"' in source
+    for field in ("运行模式", "交易权限", "实时行情"):
+        assert field in source
+
+
 def test_settings_form_exposes_multi_source_priority():
     assert "st.multiselect" in SRC
     assert 'data.sources' in SRC
