@@ -38,7 +38,6 @@ import os
 import socket
 import threading
 import traceback
-import builtins
 from datetime import datetime
 
 # ══════════════ 唯一必填:与本地同步的共享目录 ══════════════
@@ -71,6 +70,7 @@ _ACCOUNT = {"id": "", "type": "STOCK"}
 _MORNING_LEDGERS = {}        # 用当日成交重算账本的起点
 _SEEN_DEAL_COUNTS = {}
 _LIVE_LAST = {"payload": None}
+_RPC_SERVER = None           # stop(ContextInfo) 负责关闭,释放模型后台监听
 
 try:                         # QMT 环境内为内置注入;本地占位仅供阅读/测试
     passorder  # noqa: B018
@@ -503,28 +503,6 @@ def _make_server_socket():
     return srv
 
 
-def _process_server_lock():
-    """QMT 进程级可重入锁;模型脚本热重载后仍复用同一个注册表。"""
-    lock = getattr(builtins, "_SINAN_RPC_SERVER_LOCK", None)
-    if lock is None:
-        lock = threading.RLock()
-        setattr(builtins, "_SINAN_RPC_SERVER_LOCK", lock)
-    return lock
-
-
-def _replace_process_server(current):
-    """关闭上一代模型遗留监听,并登记当前监听。"""
-    with _process_server_lock():
-        previous = getattr(builtins, "_SINAN_RPC_SERVER", None)
-        if previous is not None and previous is not current:
-            try:
-                previous.close()
-                print("[rpc] 已关闭上一代模型遗留监听")
-            except OSError:
-                pass
-        setattr(builtins, "_SINAN_RPC_SERVER", current)
-
-
 def serve(namespace, C, host=RPC_HOST, port=RPC_PORT, token=RPC_TOKEN,
           allow_trade=RPC_ALLOW_TRADE, allow_ips=None):
     allow_ips = list(allow_ips if allow_ips is not None else RPC_ALLOW_IPS)
@@ -534,13 +512,9 @@ def serve(namespace, C, host=RPC_HOST, port=RPC_PORT, token=RPC_TOKEN,
         if not allow_ips:
             raise ValueError("非本机绑定(%s)必须配置 ALLOW_IPS 白名单"
                              "(单 IP 或 CIDR,如 100.64.0.0/10)" % host)
-    # 整个 QMT 客户端共享 builtins;模型热重启前先关闭旧脚本遗留的后台监听。
-    with _process_server_lock():
-        _replace_process_server(None)
-        srv = _make_server_socket()
-        srv.bind((host, port))
-        srv.listen(4)
-        _replace_process_server(srv)
+    srv = _make_server_socket()
+    srv.bind((host, port))
+    srv.listen(4)
 
     def _loop():
         while True:
@@ -562,7 +536,7 @@ def serve(namespace, C, host=RPC_HOST, port=RPC_PORT, token=RPC_TOKEN,
 
 # ══════════════════════ QMT 入口 ══════════════════════
 def init(C):
-    global _C
+    global _C, _RPC_SERVER
     _C = C
     _ACCOUNT["id"], _ACCOUNT["type"] = _detect_account(C)
     print("[sinan] 账号 %s(%s)/ 模式 %s"
@@ -575,7 +549,20 @@ def init(C):
               % (LIVE_PUSH_PERIOD,
                  os.path.join(SHARE_DIR, "state", "qmt_live.json")))
     if RPC_ENABLE:
-        serve(globals(), C)
+        _RPC_SERVER = serve(globals(), C)
+
+
+def stop(C):
+    """QMT 策略停止回调:关闭后台 RPC socket,保证模型可直接热重启。"""
+    global _RPC_SERVER
+    if _RPC_SERVER is not None:
+        try:
+            _RPC_SERVER.close()
+            print("[rpc] 策略停止,监听端口已释放")
+        except OSError as e:
+            print("[rpc] 关闭监听时告警:%s" % e)
+        finally:
+            _RPC_SERVER = None
 
 
 def handlebar(C):

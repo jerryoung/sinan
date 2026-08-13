@@ -14,7 +14,7 @@
 - `RPC_ALLOW_TRADE = False`，远端 RPC 默认只读。
 - 非本机绑定且缺少 Token 或白名单时拒绝启动。
 - Windows 使用 `SO_EXCLUSIVEADDRUSE`；其他平台使用 `SO_REUSEADDR`。
-- 模型热重启必须关闭 QMT 进程内上一代监听后再绑定。
+- QMT `stop(ContextInfo)` 回调必须关闭当前模型监听，确保下次启动可重新绑定。
 - 保留 targets、fills、虚拟账本和 5 秒实盘推送能力。
 
 ---
