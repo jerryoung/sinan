@@ -8,12 +8,11 @@ QMT 策略后生效。
 
 ## 配置边界
 
-QMT 脚本只保留安全、通用的代码默认值，不保存服务器私有值。Windows 用户目录
-保存两个不进入代码仓库和同步目录的本机文件：
+QMT 脚本只保留安全、通用的代码默认值，不保存服务器私有值。沿用既有
+`C:\sinan` 目录体系，全部机器配置统一保存在一个本机文件中：
 
-- `%APPDATA%\Sinan\qmt.json`：共享目录、RPC 开关、监听地址、端口、交易权限和
-  IP 白名单；
-- `%APPDATA%\Sinan\qmt_rpc_token`：仅保存 RPC Token，首尾空白在读取时去除。
+- `C:\sinan\config\qmt.json`：共享目录、实盘推送参数、RPC 参数、Token 和
+  IP 白名单。
 
 `qmt.json` 的结构固定为：
 
@@ -24,6 +23,7 @@ QMT 脚本只保留安全、通用的代码默认值，不保存服务器私有�
     "enable": true,
     "host": "0.0.0.0",
     "port": 58620,
+    "token": "替换为至少32位的随机Token",
     "allow_trade": true,
     "allow_ips": ["120.245.101.210"]
   },
@@ -34,8 +34,9 @@ QMT 脚本只保留安全、通用的代码默认值，不保存服务器私有�
 }
 ```
 
-Token 不允许出现在 JSON、脚本、日志、异常信息或共享目录中。迁移时轮换此前曾
-进入粘贴内容的 Token。
+Token 只允许出现在这份服务器本地 JSON 中，不允许进入脚本、日志、异常信息或
+共享目录。配置文件应仅允许运行 QMT 的 Windows 用户读取。迁移时轮换此前曾进入
+粘贴内容的 Token。
 
 ## 加载模块与启动流程
 
@@ -44,11 +45,11 @@ Token 不允许出现在 JSON、脚本、日志、异常信息或共享目录中
 
 加载顺序：
 
-1. 构造代码内安全默认值；
-2. 从 `%APPDATA%\Sinan\qmt.json` 读取普通配置；
-3. 从 `%APPDATA%\Sinan\qmt_rpc_token` 读取 Token；
-4. 校验最终配置后启动实盘推送和 RPC；
-5. 后续修改文件，通过停止并重新启动 QMT 策略生效，无需重启整个 QMT 客户端。
+1. 构造代码内安全默认值，其中共享目录仍缺省为
+   `C:\sinan\var\runtime`；
+2. 从固定路径 `C:\sinan\config\qmt.json` 读取全部机器配置；
+3. 校验最终配置后启动实盘推送和 RPC；
+4. 后续修改文件，通过停止并重新启动 QMT 策略生效，无需重启整个 QMT 客户端。
 
 QMT Python 运行环境不依赖 PyYAML，因此使用标准库 JSON。脚本仍保留
 `C:\sinan\var\runtime` 作为共享目录缺省值，便于本机既有安装平滑迁移。
@@ -62,13 +63,13 @@ QMT Python 运行环境不依赖 PyYAML，因此使用标准库 JSON。脚本仍
   文件路径，不包含 Token 内容。
 - 启动日志输出生效配置路径、监听地址、白名单、交易权限和 `token_length`，便于
   排查实际读取的是哪份配置。
-- Token 文件建议仅允许运行 QMT 的 Windows 用户读取。
+- `qmt.json` 建议仅允许运行 QMT 的 Windows 用户读取。
 
 ## 交付与迁移
 
 仓库提供无秘密的 `qmt.local.example.json` 和一次性 PowerShell 初始化命令。首次
-部署只需创建上述两个本机文件；以后更新只替换 QMT 脚本。现有设置页和 macOS
-侧 `~/.qmt_rpc_token` 的使用方式不变，两端 Token 内容保持一致。
+部署只需创建 `C:\sinan\config\qmt.json`；以后更新只替换 QMT 脚本。现有设置页
+和 macOS 侧 `~/.qmt_rpc_token` 的使用方式不变，两端 Token 内容保持一致。
 
 ## 验证
 
