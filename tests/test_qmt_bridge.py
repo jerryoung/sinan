@@ -128,11 +128,104 @@ class _COS:                                     # 模拟 QMT 账户对象(m_* �
 
 
 class _FakeC:                                   # 模拟 ContextInfo
+    def __init__(self):
+        self.schedules = []
+
+    def run_time(self, name, period, start, market):
+        self.schedules.append((name, period, start, market))
+
     def get_full_tick(self, codes):
         return {c: {"lastPrice": 4.75} for c in codes}
 
     def get_stock_name(self, code):
         return "沪深300ETF"
+
+
+def _runtime_config(**rpc_overrides):
+    rpc = {
+        "enable": True,
+        "host": "127.0.0.1",
+        "port": 60001,
+        "token": "x" * 32,
+        "allow_trade": True,
+        "allow_ips": ["127.0.0.1"],
+    }
+    rpc.update(rpc_overrides)
+    return {
+        "share_dir": r"D:\sinan\runtime",
+        "rpc": rpc,
+        "live_push": {"enable": False, "period": "10nSecond"},
+    }
+
+
+def _restore_runtime_globals_after_test(monkeypatch):
+    """init 会应用进程级启动快照；逐项登记以便 pytest 在用例后还原。"""
+    for name in (
+        "SHARE_DIR", "RPC_ENABLE", "RPC_HOST", "RPC_PORT", "RPC_TOKEN",
+        "RPC_ALLOW_TRADE", "RPC_ALLOW_IPS", "LIVE_PUSH_ENABLE",
+        "LIVE_PUSH_PERIOD", "_RPC_SERVER",
+    ):
+        monkeypatch.setattr(rpc_server, name, getattr(rpc_server, name))
+
+
+def test_init_applies_local_config_to_runtime(monkeypatch):
+    """启动必须显式使用 JSON 快照，不能继续吃函数定义时捕获的旧常量。"""
+    C = _FakeC()
+    server = Mock()
+    _restore_runtime_globals_after_test(monkeypatch)
+    monkeypatch.setattr(rpc_server, "load_local_config", _runtime_config)
+    monkeypatch.setattr(rpc_server, "serve", Mock(return_value=server))
+
+    rpc_server.init(C)
+
+    assert rpc_server.SHARE_DIR == r"D:\sinan\runtime"
+    assert [item[0] for item in C.schedules] == ["do_rebalance", "do_snapshot"]
+    rpc_server.serve.assert_called_once_with(
+        rpc_server.__dict__, C,
+        host="127.0.0.1", port=60001, token="x" * 32,
+        allow_trade=True, allow_ips=["127.0.0.1"],
+    )
+    assert rpc_server._RPC_SERVER is server
+
+
+def test_init_keeps_core_schedules_when_local_config_is_invalid(
+        monkeypatch, capsys):
+    """配置损坏只能关闭 RPC，不能让当日调仓和快照调度消失。"""
+    C = _FakeC()
+    _restore_runtime_globals_after_test(monkeypatch)
+    monkeypatch.setattr(
+        rpc_server, "load_local_config",
+        Mock(side_effect=rpc_server.QmtConfigError("rpc.port 非法")),
+    )
+    monkeypatch.setattr(rpc_server, "serve", Mock())
+
+    rpc_server.init(C)
+
+    assert [item[0] for item in C.schedules] == [
+        "do_rebalance", "do_snapshot", "do_live_push"
+    ]
+    rpc_server.serve.assert_not_called()
+    assert rpc_server._RPC_SERVER is None
+    assert "RPC 未启动" in capsys.readouterr().out
+
+
+def test_init_keeps_core_schedules_when_rpc_port_is_occupied(
+        monkeypatch, capsys):
+    """端口占用应变成局部告警，而不是从 init 向 QMT 抛出 WinError 10048。"""
+    C = _FakeC()
+    _restore_runtime_globals_after_test(monkeypatch)
+    monkeypatch.setattr(rpc_server, "load_local_config", _runtime_config)
+    monkeypatch.setattr(
+        rpc_server, "serve", Mock(side_effect=OSError(10048, "端口已占用"))
+    )
+
+    rpc_server.init(C)
+
+    assert [item[0] for item in C.schedules] == ["do_rebalance", "do_snapshot"]
+    assert rpc_server._RPC_SERVER is None
+    output = capsys.readouterr().out
+    assert "RPC 未启动" in output
+    assert "10048" in output
 
 
 ORDERS = []

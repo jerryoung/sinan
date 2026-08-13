@@ -187,6 +187,24 @@ def load_local_config(path=QMT_CONFIG_PATH):
                              (path, type(e).__name__))
     return _validate_local_config(_merge_config(defaults, supplied))
 
+
+def _apply_local_config(cfg):
+    """把启动快照接入现有薄壳变量；调用方无需了解配置文件结构。"""
+    global SHARE_DIR, RPC_ENABLE, RPC_HOST, RPC_PORT, RPC_TOKEN
+    global RPC_ALLOW_TRADE, RPC_ALLOW_IPS
+    global LIVE_PUSH_ENABLE, LIVE_PUSH_PERIOD
+    SHARE_DIR = cfg["share_dir"]
+    rpc = cfg["rpc"]
+    RPC_ENABLE = rpc["enable"]
+    RPC_HOST = rpc["host"]
+    RPC_PORT = rpc["port"]
+    RPC_TOKEN = rpc["token"]
+    RPC_ALLOW_TRADE = rpc["allow_trade"]
+    RPC_ALLOW_IPS = list(rpc["allow_ips"])
+    live = cfg["live_push"]
+    LIVE_PUSH_ENABLE = live["enable"]
+    LIVE_PUSH_PERIOD = live["period"]
+
 try:                         # QMT 环境内为内置注入;本地占位仅供阅读/测试
     passorder  # noqa: B018
 except NameError:
@@ -658,6 +676,14 @@ def serve(namespace, C, host=RPC_HOST, port=RPC_PORT, token=RPC_TOKEN,
 def init(C):
     global _C, _RPC_SERVER
     _C = C
+    _RPC_SERVER = None
+    try:
+        cfg = load_local_config()
+    except QmtConfigError as e:
+        cfg = _default_local_config()
+        print("[config] 配置不可用:%s" % e)
+        print("[rpc] RPC 未启动:请修复 %s 后重启策略" % QMT_CONFIG_PATH)
+    _apply_local_config(cfg)
     _ACCOUNT["id"], _ACCOUNT["type"] = _detect_account(C)
     print("[sinan] 账号 %s(%s)/ 模式 %s"
           % (_ACCOUNT["id"] or "未识别", _ACCOUNT["type"], _trade_mode(C)))
@@ -669,7 +695,13 @@ def init(C):
               % (LIVE_PUSH_PERIOD,
                  os.path.join(SHARE_DIR, "state", "qmt_live.json")))
     if RPC_ENABLE:
-        _RPC_SERVER = serve(globals(), C)
+        try:
+            _RPC_SERVER = serve(
+                globals(), C, host=RPC_HOST, port=RPC_PORT, token=RPC_TOKEN,
+                allow_trade=RPC_ALLOW_TRADE, allow_ips=RPC_ALLOW_IPS)
+        except (OSError, ValueError) as e:
+            _RPC_SERVER = None
+            print("[rpc] RPC 未启动:%s" % e)
 
 
 def stop(C):
