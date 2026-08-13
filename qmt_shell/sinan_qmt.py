@@ -40,7 +40,8 @@ import threading
 import traceback
 from datetime import datetime
 
-# ══════════════ 唯一必填:与本地同步的共享目录 ══════════════
+# ══════════════ 服务器本地配置(替换脚本时无需再修改)══════════════
+QMT_CONFIG_PATH = r"C:\sinan\config\qmt.json"
 SHARE_DIR = r"C:\sinan\var\runtime"
 
 # ---- 以下全部可保持缺省 --------------------------------------------------
@@ -71,6 +72,120 @@ _MORNING_LEDGERS = {}        # 用当日成交重算账本的起点
 _SEEN_DEAL_COUNTS = {}
 _LIVE_LAST = {"payload": None}
 _RPC_SERVER = None           # stop(ContextInfo) 负责关闭,释放模型后台监听
+
+
+class QmtConfigError(ValueError):
+    """QMT 本机配置不可用；消息不得包含 Token 内容。"""
+
+
+def _default_local_config():
+    """每次返回独立字典，避免测试或运行期间共享嵌套可变对象。"""
+    return {
+        "share_dir": r"C:\sinan\var\runtime",
+        "rpc": {
+            "enable": False,
+            "host": "0.0.0.0",
+            "port": 58620,
+            "token": "",
+            "allow_trade": True,
+            "allow_ips": [],
+        },
+        "live_push": {"enable": True, "period": "5nSecond"},
+    }
+
+
+def _merge_config(defaults, supplied, prefix=""):
+    """只合并约定字段；结构写错时在启动阶段直接指出。"""
+    if not isinstance(supplied, dict):
+        raise QmtConfigError("%s必须是对象" % (prefix or "配置根节点"))
+    result = {}
+    for key, default in defaults.items():
+        field = "%s.%s" % (prefix, key) if prefix else key
+        value = supplied.get(key, default)
+        if isinstance(default, dict):
+            result[key] = _merge_config(default, value, field)
+        else:
+            result[key] = value
+    unknown = sorted(set(supplied) - set(defaults))
+    if unknown:
+        field = prefix or "配置根节点"
+        raise QmtConfigError("%s包含未知字段:%s" % (field, ",".join(unknown)))
+    return result
+
+
+def _require_bool(value, field):
+    if not isinstance(value, bool):
+        raise QmtConfigError("%s 必须是 true/false" % field)
+
+
+def _validate_local_config(cfg):
+    if not isinstance(cfg["share_dir"], str) or not cfg["share_dir"].strip():
+        raise QmtConfigError("share_dir 必须是非空字符串")
+    cfg["share_dir"] = cfg["share_dir"].strip()
+
+    rpc = cfg["rpc"]
+    _require_bool(rpc["enable"], "rpc.enable")
+    _require_bool(rpc["allow_trade"], "rpc.allow_trade")
+    if not isinstance(rpc["host"], str) or not rpc["host"].strip():
+        raise QmtConfigError("rpc.host 必须是非空字符串")
+    rpc["host"] = rpc["host"].strip()
+    if isinstance(rpc["port"], bool) or not isinstance(rpc["port"], int):
+        raise QmtConfigError("rpc.port 必须是整数")
+    if not 1 <= rpc["port"] <= 65535:
+        raise QmtConfigError("rpc.port 必须在 1..65535")
+    if not isinstance(rpc["token"], str):
+        raise QmtConfigError("rpc.token 必须是字符串")
+    rpc["token"] = rpc["token"].strip()
+    if not isinstance(rpc["allow_ips"], list):
+        raise QmtConfigError("rpc.allow_ips 必须是数组")
+    clean_ips = []
+    for entry in rpc["allow_ips"]:
+        if not isinstance(entry, str) or not entry.strip():
+            raise QmtConfigError("rpc.allow_ips 必须只包含 IP 或 CIDR 字符串")
+        entry = entry.strip()
+        try:
+            ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            raise QmtConfigError("rpc.allow_ips 包含无效 IP/CIDR")
+        clean_ips.append(entry)
+    rpc["allow_ips"] = clean_ips
+
+    live = cfg["live_push"]
+    _require_bool(live["enable"], "live_push.enable")
+    if not isinstance(live["period"], str) or not live["period"].strip():
+        raise QmtConfigError("live_push.period 必须是非空字符串")
+    live["period"] = live["period"].strip()
+
+    if rpc["enable"] and rpc["host"] not in ("127.0.0.1", "localhost"):
+        if len(rpc["token"]) < 32:
+            raise QmtConfigError("远程 RPC 的 rpc.token 必须至少32位")
+        if not rpc["allow_ips"]:
+            raise QmtConfigError("远程 RPC 的 rpc.allow_ips 不能为空")
+    return cfg
+
+
+def load_local_config(path=QMT_CONFIG_PATH):
+    """读取服务器本地配置；缺失时生成关闭 RPC 的安全默认文件。"""
+    defaults = _default_local_config()
+    if not os.path.exists(path):
+        parent = os.path.dirname(path)
+        try:
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(defaults, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+        except (OSError, TypeError) as e:
+            raise QmtConfigError("无法创建 QMT 配置文件 %s:%s" % (path, e))
+        print("[config] 已生成安全默认配置:%s" % path)
+        print("[config] 请填写 Token、白名单并启用 RPC 后重启策略")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            supplied = json.load(f)
+    except (OSError, ValueError) as e:
+        raise QmtConfigError("无法读取 QMT 配置文件 %s:%s" %
+                             (path, type(e).__name__))
+    return _validate_local_config(_merge_config(defaults, supplied))
 
 try:                         # QMT 环境内为内置注入;本地占位仅供阅读/测试
     passorder  # noqa: B018

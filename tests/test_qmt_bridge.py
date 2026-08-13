@@ -3,6 +3,7 @@
 用伪 QMT 命名空间(passorder/get_trade_detail_data/COS 对象)与伪
 ContextInfo 在本地起真实 socket 服务,SDK 走完整协议往返。
 """
+import json
 import socket
 from unittest.mock import Mock
 
@@ -18,6 +19,82 @@ def test_qmt_rpc_defaults_are_unconfigured_and_trade_enabled():
     assert rpc_server.RPC_TOKEN == ""
     assert rpc_server.RPC_ALLOW_IPS == []
     assert rpc_server.RPC_ALLOW_TRADE is True
+
+
+def test_load_local_config_creates_safe_default_when_file_missing(tmp_path):
+    """删除配置文件后再启动，必须自动落一份关闭 RPC 的可编辑安全配置。"""
+    path = tmp_path / "config" / "qmt.json"
+
+    cfg = rpc_server.load_local_config(str(path))
+
+    assert path.exists()
+    assert cfg["share_dir"] == r"C:\sinan\var\runtime"
+    assert cfg["rpc"] == {
+        "enable": False,
+        "host": "0.0.0.0",
+        "port": 58620,
+        "token": "",
+        "allow_trade": True,
+        "allow_ips": [],
+    }
+    assert cfg["live_push"] == {"enable": True, "period": "5nSecond"}
+    assert json.loads(path.read_text(encoding="utf-8")) == cfg
+
+
+def test_load_local_config_reads_all_machine_values_from_one_file(tmp_path):
+    """替换脚本后，服务器路径、Token 和白名单仍全部来自同一 JSON。"""
+    path = tmp_path / "qmt.json"
+    path.write_text(json.dumps({
+        "share_dir": r"D:\sinan\runtime",
+        "rpc": {
+            "enable": True,
+            "host": "0.0.0.0",
+            "port": 60001,
+            "token": "  " + "x" * 32 + "\n",
+            "allow_trade": False,
+            "allow_ips": ["120.245.101.210", "100.64.0.0/10"],
+        },
+        "live_push": {"enable": False, "period": "10nSecond"},
+    }), encoding="utf-8")
+
+    cfg = rpc_server.load_local_config(str(path))
+
+    assert cfg["share_dir"] == r"D:\sinan\runtime"
+    assert cfg["rpc"]["port"] == 60001
+    assert cfg["rpc"]["token"] == "x" * 32
+    assert cfg["rpc"]["allow_trade"] is False
+    assert cfg["rpc"]["allow_ips"] == [
+        "120.245.101.210", "100.64.0.0/10"
+    ]
+    assert cfg["live_push"] == {"enable": False, "period": "10nSecond"}
+
+
+@pytest.mark.parametrize("payload,match", [
+    ({"rpc": {"port": 70000}}, "rpc.port"),
+    ({"rpc": {"allow_ips": ["错误IP"]}}, "rpc.allow_ips"),
+    ({"rpc": {"enable": True, "host": "0.0.0.0",
+              "token": "short", "allow_ips": ["1.2.3.4"]}}, "至少32位"),
+    ({"live_push": {"enable": "yes"}}, "live_push.enable"),
+])
+def test_load_local_config_rejects_invalid_values(tmp_path, payload, match):
+    """错误配置必须在启动时定位，不得留到收到 RPC 请求时才暴露。"""
+    path = tmp_path / "qmt.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(rpc_server.QmtConfigError, match=match):
+        rpc_server.load_local_config(str(path))
+
+
+def test_load_local_config_rejects_invalid_json_without_leaking_content(tmp_path):
+    """损坏配置的异常只报告路径，不复述可能含 Token 的文件正文。"""
+    path = tmp_path / "qmt.json"
+    path.write_text('{"rpc":{"token":"TOP_SECRET"}', encoding="utf-8")
+
+    with pytest.raises(rpc_server.QmtConfigError) as exc:
+        rpc_server.load_local_config(str(path))
+
+    assert str(path) in str(exc.value)
+    assert "TOP_SECRET" not in str(exc.value)
 
 
 def test_windows_rpc_socket_uses_exclusive_address(monkeypatch):
