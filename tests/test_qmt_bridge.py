@@ -69,12 +69,25 @@ def test_load_local_config_reads_all_machine_values_from_one_file(tmp_path):
     assert cfg["live_push"] == {"enable": False, "period": "10nSecond"}
 
 
+def test_load_local_config_accepts_windows_powershell_utf8_bom(tmp_path):
+    """Windows PowerShell 5 写出的 UTF-8 BOM 配置必须可直接读取。"""
+    path = tmp_path / "qmt.json"
+    payload = {"rpc": {"enable": False}}
+    path.write_bytes(json.dumps(payload).encode("utf-8-sig"))
+
+    cfg = rpc_server.load_local_config(str(path))
+
+    assert cfg["rpc"]["enable"] is False
+    assert cfg["share_dir"] == r"C:\sinan\var\runtime"
+
+
 @pytest.mark.parametrize("payload,match", [
     ({"rpc": {"port": 70000}}, "rpc.port"),
     ({"rpc": {"allow_ips": ["错误IP"]}}, "rpc.allow_ips"),
     ({"rpc": {"enable": True, "host": "0.0.0.0",
               "token": "short", "allow_ips": ["1.2.3.4"]}}, "至少32位"),
     ({"live_push": {"enable": "yes"}}, "live_push.enable"),
+    ({"live_push": {"period": "随便写"}}, "live_push.period"),
 ])
 def test_load_local_config_rejects_invalid_values(tmp_path, payload, match):
     """错误配置必须在启动时定位，不得留到收到 RPC 请求时才暴露。"""

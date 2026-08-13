@@ -1,0 +1,17 @@
+{
+  "share_dir": "C:\\sinan\\var\\runtime",
+  "rpc": {
+    "enable": false,
+    "host": "0.0.0.0",
+    "port": 58620,
+    "token": "REPLACE_WITH_AT_LEAST_32_RANDOM_CHARACTERS",
+    "allow_trade": true,
+    "allow_ips": [
+      "REPLACE_WITH_CLIENT_PUBLIC_IP"
+    ]
+  },
+  "live_push": {
+    "enable": true,
+    "period": "5nSecond"
+  }
+}

@@ -1,5 +1,5 @@
 # coding: utf-8
-"""
+r"""
 司南 ECS 统一脚本——放进大 QMT 的唯一一个模型,三件事全包:
 
     ① 14:45 执行当日全部策略的 targets(多策略共账号,下单备注归因)
@@ -8,11 +8,12 @@
     ④ 每 5 秒推送实盘信息:新成交即时回写 fills,账户快照写
        state/qmt_live.json
 
-── 配置最小化(第一性原理)──────────────────────────────────────────
+── 服务器本地配置(第一性原理)──────────────────────────────────────
 你在 QMT 把本模型绑定到 模拟/实盘 账号时已经选过 账号类型 与 资金账号,
 脚本直接从运行环境读取(account/accountType 注入,ContextInfo 属性兜底),
-不需要再填一遍。**必填配置只有一项:SHARE_DIR(与本地同步的目录)**;
-其余全部有合理缺省。
+不需要再填一遍。机器配置统一从 C:\sinan\config\qmt.json 读取;文件不存在
+会自动生成关闭 RPC 的安全默认配置。以后整文件替换脚本无需再修改 Token、
+白名单或共享目录,修改配置后重启策略生效。
 
 ── 多策略共账号:备注归因 + 策略虚拟账本 ─────────────────────────────
 每笔委托的投资备注为「策略ID#日期#序号」(可再扩展 # 字段)。脚本为每个
@@ -25,7 +26,7 @@
 ── 安全(远程访问必读,详见 docs/qmt-deploy.md)─────────────────────
 RPC 明文 TCP:传输安全靠 SSH 隧道/Tailscale;非 127.0.0.1 绑定强制
 非空 TOKEN + 非空 IP 白名单(支持 CIDR),缺一拒绝启动;
-RPC_ALLOW_TRADE=False 时转发通道只读(targets 批处理执行不受影响)。
+rpc.allow_trade=false 时转发通道只读(targets 批处理执行不受影响)。
 
 本文件在本地不可执行(passorder 等由 QMT 注入),部署=整文件粘贴;
 校验和算法与 sinan/live/targets.py 逐字节一致(文件桥接解耦的全部代价)。
@@ -35,12 +36,13 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 import socket
 import threading
 import traceback
 from datetime import datetime
 
-# ══════════════ 服务器本地配置(替换脚本时无需再修改)══════════════
+# ══════════════ 唯一配置入口(替换脚本时无需再修改)═══════════════
 QMT_CONFIG_PATH = r"C:\sinan\config\qmt.json"
 SHARE_DIR = r"C:\sinan\var\runtime"
 
@@ -55,12 +57,12 @@ ALGO_DEFAULT = {"quote_mode": "latest",   # latest=最新价 / limit=限价(+偏
                 "price_offset": 0.002, "max_order_qty": 100 * LOT}
 _PR_TYPE = {"latest": 5, "limit": 11}
 
-RPC_ENABLE = True            # 关掉则只做 targets 批处理
-RPC_HOST = "0.0.0.0"         # 远程监听;必须同时填写 TOKEN 和 ALLOW_IPS
+RPC_ENABLE = False           # 安全缺省；由 qmt.json 覆盖
+RPC_HOST = "0.0.0.0"         # 远程监听须同时配置 Token 和 IP 白名单
 RPC_PORT = 58620
-RPC_TOKEN = ""               # 非 127.0.0.1 绑定必须非空(≥32 位随机)
-RPC_ALLOW_TRADE = True       # RPC 是否允许 passorder/cancel;公网须配白名单+TOKEN
-RPC_ALLOW_IPS = []           # 非本机绑定必须非空:单 IP 或 CIDR(100.64.0.0/10)
+RPC_TOKEN = ""               # 仅为安全缺省；实际值只放 qmt.json
+RPC_ALLOW_TRADE = True       # 是否允许 passorder/cancel
+RPC_ALLOW_IPS = []           # 单 IP 或 CIDR(100.64.0.0/10)
 
 LIVE_PUSH_ENABLE = True
 LIVE_PUSH_PERIOD = "5nSecond"
@@ -155,6 +157,10 @@ def _validate_local_config(cfg):
     if not isinstance(live["period"], str) or not live["period"].strip():
         raise QmtConfigError("live_push.period 必须是非空字符串")
     live["period"] = live["period"].strip()
+    if not re.match(r"^[1-9][0-9]*n(Second|Minute|Hour|Day)$",
+                    live["period"]):
+        raise QmtConfigError(
+            "live_push.period 格式错误(例如 5nSecond、1nMinute)")
 
     if rpc["enable"] and rpc["host"] not in ("127.0.0.1", "localhost"):
         if len(rpc["token"]) < 32:
@@ -180,7 +186,7 @@ def load_local_config(path=QMT_CONFIG_PATH):
         print("[config] 已生成安全默认配置:%s" % path)
         print("[config] 请填写 Token、白名单并启用 RPC 后重启策略")
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             supplied = json.load(f)
     except (OSError, ValueError) as e:
         raise QmtConfigError("无法读取 QMT 配置文件 %s:%s" %

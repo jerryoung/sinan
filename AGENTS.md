@@ -66,6 +66,10 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   隔夜价格漂移,容忍度 `risk.reconcile_tolerance` 默认 2pp)。qmt_shell 的
   checksum 算法与 `sinan/live/targets.py` 两侧各持一份拷贝,必须逐字节一致。策略净值统一由
   `sinan/live/ledger.py` 派生(有 fills 用账户真值,否则 targets 影子重放)。
+- **QMT 服务器机器配置**:固定从 `C:\sinan\config\qmt.json` 读取共享目录、
+  实盘推送、RPC、Token 与 IP 白名单；文件缺失时薄壳自动生成
+  `rpc.enable=false` 的安全默认配置。私有值不得写回 `sinan_qmt.py`、仓库、日志或
+  runtime 同步目录；修改 JSON 后停止并重新启动 QMT 策略生效。
 - **风险层级**:策略参数 cap/x_risk → 引擎 Σ≤1 + `max_positions`(与 live 共用
   `sinan/risk.py` 的 `limit_positions`:已持仓优先)→ live `apply_risk` 多重裁剪
   → 单标的 34% 兜底。共享风险原语放中立的 `sinan/risk.py`,**研究层不依赖实盘层**。

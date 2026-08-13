@@ -8,7 +8,7 @@
 | 执行当日全部策略的 targets | 14:45 | 多策略共账号,下单备注「策略ID#日期#序号」归因 |
 | 按成交回报回写各策略 fills | 15:05 | 备注归因 deals → 策略虚拟账本 → fills_{策略}_{日期}.json |
 | 实盘状态推送 | 每 5 秒 | 新成交即时修正 fills，账户快照写 state/qmt_live.json |
-| API socket 转发(qmt_sdk 对端) | 常驻 | RPC_ENABLE=False 可关 |
+| API socket 转发(qmt_sdk 对端) | 常驻 | `rpc.enable=false` 可关 |
 
 模拟盘/实盘:在 QMT 把模型绑到模拟或实盘账号时决定,脚本只如实上报
 (fills 的 `trade_mode`);**资金账号/账号类型同样从绑定关系直读,
@@ -16,13 +16,45 @@
 
 ## 一、QMT 侧部署(ECS)
 
-1. 大 QMT → 新建模型 → 整文件粘贴 `sinan_qmt.py`;
-2. 改 `SHARE_DIR` 为与本地同步的目录(坚果云/Syncthing 盘);
-3. 如启用远程 RPC，在顶部配置区自行填写 `RPC_TOKEN` 与
-   `RPC_ALLOW_IPS`；仓库脚本不预填任何 Token 或白名单；
-4. 绑定 模拟/实盘 账号并运行——账号信息自动读取,多策略无须多个模型。
+1. 大 QMT → 新建模型 → 整文件粘贴 `sinan_qmt.py`；
+2. 绑定模拟/实盘账号并运行——账号信息自动读取，多策略无须多个模型；
+3. 首次运行会自动生成 `C:\sinan\config\qmt.json`，RPC 默认关闭；
+4. 编辑这一个配置文件，填好 Token、白名单并把 `rpc.enable` 改为 `true`；
+5. 停止并重新启动策略，配置即生效，无需重启整个 QMT 客户端。
 
-只能有一个 QMT 模型设置 `RPC_ENABLE = True`。Windows 端使用独占端口，
+配置示例见 `qmt_shell/qmt.local.example.json`。服务端的共享目录、实盘推送、
+RPC、Token 和白名单都只维护在这一份 JSON 中；以后升级只需整份替换脚本。
+
+首次运行前也可以用管理员 PowerShell 一次性创建安全配置：
+
+```powershell
+$configDir = 'C:\sinan\config'
+$configPath = Join-Path $configDir 'qmt.json'
+$tokenBytes = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tokenBytes)
+$rpcToken = [Convert]::ToBase64String($tokenBytes)
+New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+@{
+  share_dir = 'C:\sinan\var\runtime'
+  rpc = @{
+    enable = $false
+    host = '0.0.0.0'
+    port = 58620
+    token = $rpcToken
+    allow_trade = $true
+    allow_ips = @('替换为本机出口IP')
+  }
+  live_push = @{enable = $true; period = '5nSecond'}
+} | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 $configPath
+icacls $configPath /inheritance:r /grant:r "$env:USERNAME`:(F)" | Out-Null
+Write-Host "配置已生成: $configPath"
+Write-Host "RPC Token: $rpcToken"
+```
+
+把输出的 Token 写入本地 Mac 的 `~/.qmt_rpc_token`，确认白名单后将 JSON 中
+`enable` 改为 `true`，再重启策略。不要把 PowerShell 输出或 JSON 提交到仓库。
+
+只能有一个 QMT 模型设置 `rpc.enable = true`。Windows 端使用独占端口，
 第二个模型再监听 58620 会明确报端口占用，避免连接被多个模型随机分流。
 启动日志会打印实际脚本路径、生效白名单和 Token 长度，不会打印 Token 内容。
 脚本实现 QMT 官方 `stop(ContextInfo)` 停止回调：停止模型时主动关闭后台
@@ -50,7 +82,7 @@ Set-Service -Name sshd -StartupType Automatic
 
 云控制台安全组:只放行 22 端口,授权对象填你本机公网 IP(如 `x.x.x.x/32`,
 IP 会变就按段放行)——网络层物理隔离的第一道。`sinan_qmt.py` 保持
-`RPC_HOST = "127.0.0.1"` 不变(RPC 端口对公网零暴露)。
+`rpc.host = "127.0.0.1"`(RPC 端口对公网零暴露)。
 
 **本机侧**:`~/.ssh/config` 加一段,免记参数:
 
@@ -73,15 +105,15 @@ ssh -N qmt-ecs
 
 ### 方案 B:Tailscale(推荐,免隧道运维)
 
-两端安装 Tailscale 登录同一账号;`sinan_qmt.py` 的 `RPC_HOST` 改绑 ECS 的
-`100.x.y.z` 虚拟网卡 IP,并配置强 `RPC_TOKEN`(≥32 位随机)与
-`RPC_ALLOW_IPS`;本地“设置 → 实盘配置”默认项的“QMT 数据连接”填该 IP。
+两端安装 Tailscale 登录同一账号；`qmt.json` 的 `rpc.host` 改绑 ECS 的
+`100.x.y.z` 虚拟网卡 IP，并配置强 Token（≥32 位随机）与 `allow_ips`；
+本地“设置 → 实盘配置”默认项的“QMT 数据连接”填该 IP。
 公网不可见,私网可达。
 
 ### 方案 C:直接暴露公网端口(不推荐)
 
 仅当:ECS 安全组把 58620 收紧到你的固定出口 IP + `TOKEN` ≥32 位随机 +
-`RPC_ALLOW_TRADE = False`(只读,禁下单)三者同时满足才可接受。
+`rpc.allow_trade = false`(只读,禁下单)三者同时满足才可接受。
 明文协议意味着链路上的观察者可见请求内容——交易通道请回到方案 A/B。
 
 ### 服务端强制与开关
@@ -94,9 +126,10 @@ ssh -N qmt-ecs
   固定出口 IP。**ECS 安全组同样要收紧到相同来源——两层白名单互为备份**
   (安全组防的是端口扫描,应用层防的是安全组误配);
 - token 恒时比较(防时序侧信道);非白名单连接在握手层直接断开并记日志;
-- `RPC_ALLOW_TRADE = False` 把通道降为只读:行情/账户查询照常,
+- `rpc.allow_trade = false` 把通道降为只读:行情/账户查询照常,
   `passorder`/`cancel` 一律拒绝——远端调试建议默认只读,要下单时再开。
-- 仓库脚本当前默认 `RPC_ALLOW_TRADE = True`；部署到公网前必须确认 Token、
+- 自动生成配置的 `rpc.allow_trade` 默认是 `true`，但 RPC 本身默认关闭；启用并
+  部署到公网前必须确认 Token、
   应用白名单和云安全组均已收紧。需要只读调试时显式改为 `False`。
 - `rpc.health` 是无副作用健康协议，只返回服务版本、账号、运行模式和交易开关；
   “设置 → 实盘配置 → 验证 RPC”还会查询 `510300.SH` 实时行情，但不会下单。
@@ -111,8 +144,8 @@ ssh -N qmt-ecs
 python3 -c "import secrets; print(secrets.token_urlsafe(32))" > ~/.qmt_rpc_token && chmod 600 ~/.qmt_rpc_token
 ```
 
-   ECS 侧 `sinan_qmt.py` 的 `RPC_TOKEN` 填同一串。**token 严禁写进仓库/配置/日志**
-   (与 `~/.tushare_token` 同一纪律)。
+   ECS 侧 `C:\sinan\config\qmt.json` 的 `rpc.token` 填同一串。Token 只允许保存在
+   服务器本地 JSON 和 Mac 的私有文件中，严禁写进脚本、仓库、共享目录或日志。
 3. 使用:
 
 ```python
@@ -125,7 +158,7 @@ accs = qmt.get_trade_detail_data("8888888888", "STOCK", "account")
 
 - [ ] RPC 转发未直接暴露公网(SSH 隧道或 Tailscale)
 - [ ] TOKEN ≥32 位随机,两端一致,`~/.qmt_rpc_token` 权限 600
-- [ ] 远端调试期 `RPC_ALLOW_TRADE = False`,确认要下单才打开
+- [ ] 远端调试期 `rpc.allow_trade = false`,确认要下单才打开
 - [ ] ECS 安全组最小开放(方案 A 仅 22;方案 B 零公网端口)
 - [ ] fills/targets 同步盘目录不含任何凭证
 - [ ] 影子模式已并行跑 2~4 周,`trade_mode` 显示与预期一致

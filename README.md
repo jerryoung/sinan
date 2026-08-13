@@ -53,8 +53,9 @@ sinan/             Python 包(核心代码,与项目同名)
 config/            settings.yaml(本金/路径/执行/风控)· live_profiles.yaml(实盘配置)
                    · rules.yaml(品种规则)· strategies/*.yaml(含 live_profile 引用)
 scripts/           bootstrap / daily_update / shadow_update / run_signal / run_backtest / 研究脚本
-qmt_shell/         sinan_qmt(ECS 统一脚本,唯一必填 SHARE_DIR:执行全部策略 targets
-                   + 备注「策略ID#日期#序号」归因 + 策略虚拟账本 + fills 回写 + RPC
+qmt_shell/         sinan_qmt(ECS 统一脚本,机器配置统一读
+                   C:\sinan\config\qmt.json:执行全部策略 targets + 备注
+                   「策略ID#日期#序号」归因 + 策略虚拟账本 + fills 回写 + RPC
                    转发;账号/模拟实盘从 QMT 绑定关系直读)· qmt_sdk(本地 SDK,
                    与内置 API 同名同形,任意 API 经通用转发覆盖)
 app.py + ui/       Streamlit 操作面板(app.py 路由入口,ui/ 页面模块)
