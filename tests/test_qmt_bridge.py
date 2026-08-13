@@ -4,12 +4,32 @@
 ContextInfo 在本地起真实 socket 服务,SDK 走完整协议往返。
 """
 import socket
+from unittest.mock import Mock
 
 import pytest
 
 from qmt_shell import qmt_sdk, sinan_qmt as rpc_server
 from sinan.config import (LiveProfileCfg, LiveProfilesCfg, QmtExecutionCfg,
                           QmtRpcCfg)
+
+
+def test_qmt_rpc_defaults_are_unconfigured_and_readonly():
+    """仓库脚本不携带用户网络信息,远端通道默认最小权限。"""
+    assert rpc_server.RPC_TOKEN == ""
+    assert rpc_server.RPC_ALLOW_IPS == []
+    assert rpc_server.RPC_ALLOW_TRADE is False
+
+
+def test_windows_rpc_socket_uses_exclusive_address(monkeypatch):
+    """Windows QMT 必须独占端口,避免多个模型被 SO_REUSEADDR 静默分流。"""
+    fake = Mock()
+    monkeypatch.setattr(rpc_server.os, "name", "nt")
+    monkeypatch.setattr(rpc_server.socket, "socket", Mock(return_value=fake))
+
+    assert rpc_server._make_server_socket() is fake
+    fake.setsockopt.assert_called_once_with(
+        socket.SOL_SOCKET, getattr(socket, "SO_EXCLUSIVEADDRUSE", 4), 1
+    )
 
 
 class _COS:                                     # 模拟 QMT 账户对象(m_* 属性)
@@ -48,7 +68,8 @@ def bridge():
     with socket.socket() as probe:              # 找一个空闲端口
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    srv = rpc_server.serve(ns, _FakeC(), port=port, token="t0k")
+    srv = rpc_server.serve(ns, _FakeC(), host="127.0.0.1", port=port,
+                           token="t0k", allow_trade=True)
     qmt_sdk.connect("127.0.0.1", port, token="t0k")
     yield
     qmt_sdk._client.close()
@@ -85,7 +106,8 @@ def test_token_rejected():
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    srv = rpc_server.serve(ns, _FakeC(), port=port, token="secret")
+    srv = rpc_server.serve(ns, _FakeC(), host="127.0.0.1", port=port,
+                           token="secret")
     bad = qmt_sdk._Client()
     bad.connect("127.0.0.1", port, token="wrong")
     with pytest.raises(qmt_sdk.QmtRpcError, match="token"):
@@ -101,7 +123,8 @@ def test_readonly_channel_blocks_trade_allows_query():
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    srv = rpc_server.serve(ns, _FakeC(), port=port, token="t", allow_trade=False)
+    srv = rpc_server.serve(ns, _FakeC(), host="127.0.0.1", port=port,
+                           token="t", allow_trade=False)
     cli = qmt_sdk._Client()
     cli.connect("127.0.0.1", port, token="t")
     assert cli.call("get_trade_detail_data", "a", "STOCK",
@@ -131,7 +154,7 @@ def test_ip_allowlist_cidr_and_rejection():
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    srv = rpc_server.serve({}, _FakeC(), port=port, token="t",
+    srv = rpc_server.serve({}, _FakeC(), host="127.0.0.1", port=port, token="t",
                            allow_ips=["10.9.9.9"])
     cli = qmt_sdk._Client()
     cli.connect("127.0.0.1", port, token="t")
