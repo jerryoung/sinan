@@ -36,11 +36,14 @@ def _order(status=50, traded=0, **extra):
     return value
 
 
-def _deal(trade_id="D1", qty=100, price=4.8, **extra):
+def _deal(trade_id="D1", qty=100, price=4.8, commission=0.0,
+          trade_amount=None, **extra):
     value = {
         "trade_id": trade_id, "order_sys_id": "O1",
         "remark": "alpha#20260821#1", "symbol": "510300",
         "side": "buy", "qty": qty, "price": price,
+        "trade_amount": qty * price if trade_amount is None else trade_amount,
+        "commission": commission,
         "trade_time": "2026-08-21 14:46:00",
     }
     value.update(extra)
@@ -93,6 +96,21 @@ def test_duplicate_deal_is_applied_once():
     assert unique == [deal]
 
 
+def test_actual_trade_amount_and_commission_drive_buy_and_sell_cash():
+    baseline = {"cash": 100_000.0, "pos": {"159915": 100}}
+    buy = _deal(qty=100, price=4.8, trade_amount=479.5, commission=0.2)
+    sell = _deal(
+        trade_id="D2", qty=100, price=2.0, trade_amount=199.8,
+        commission=0.1, symbol="159915", side="sell",
+        order_sys_id="O2", remark="alpha#20260821#2",
+    )
+
+    ledger, unique = rpc_server._rebuild_ledger(baseline, [buy, sell])
+
+    assert ledger == {"cash": pytest.approx(99_720.0), "pos": {"510300": 100}}
+    assert unique == [buy, sell]
+
+
 class _OrderObject:
     m_strRemark = "alpha#20260821#1"
     m_strInstrumentID = "510300"
@@ -112,6 +130,8 @@ class _DealObject:
     m_nOffsetFlag = 48
     m_nVolume = 100
     m_dPrice = 4.8
+    m_dTradeAmount = 480.0
+    m_dComssion = 0.2
     m_strTradeTime = "2026-08-21 14:46:00"
 
 
@@ -129,7 +149,7 @@ def test_collect_orders_and_deals_normalize_required_safe_fields(monkeypatch):
     deals = rpc_server._collect_deals("20260821")
 
     assert orders["alpha"][0] == _order()
-    assert deals["alpha"][0] == _deal()
+    assert deals["alpha"][0] == _deal(commission=0.2)
 
 
 def test_compact_remark_is_attributed_through_execution_journal(tmp_path, monkeypatch):

@@ -71,7 +71,8 @@ def test_probe_submits_once_matches_unique_remark_and_cancels_cancelable_order()
     def call(fn, *args):
         if fn == "get_trade_detail_data" and args[2] == "order":
             remark = [c for c in client.calls if c[0] == "passorder"][0][1][9]
-            client.orders = [_order(remark, status=50)]
+            canceled = any(c[0] == "cancel" for c in client.calls)
+            client.orders = [_order(remark, status=54 if canceled else 50)]
         return original_call(fn, *args)
 
     client.call = call
@@ -90,8 +91,55 @@ def test_probe_submits_once_matches_unique_remark_and_cancels_cancelable_order()
     assert pass_calls[0][1][8] == 2
     assert len(pass_calls[0][1][9]) < 24
     assert cancel_calls == [("cancel", ("O1", "80391000", "STOCK", "__C__"))]
-    assert result["status"] == "cancel_requested"
+    assert result["status"] == "canceled"
     assert result["order_sys_id"] == "O1"
+
+
+@pytest.mark.parametrize("pending_status", [48, 49])
+def test_probe_can_cancel_unreported_and_wait_reporting_orders(pending_status):
+    client = FakeClient()
+    clock = FakeClock()
+    original_call = client.call
+
+    def call(fn, *args):
+        if fn == "get_trade_detail_data" and args[2] == "order":
+            remark = [c for c in client.calls if c[0] == "passorder"][0][1][9]
+            canceled = any(c[0] == "cancel" for c in client.calls)
+            client.orders = [
+                _order(remark, status=54 if canceled else pending_status)
+            ]
+        return original_call(fn, *args)
+
+    client.call = call
+    result = run_trade_probe(
+        client, "80391000", "510300.SH", 100, 4.5,
+        timeout=2, poll_interval=0.1, clock=clock, sleep=clock.sleep,
+    )
+
+    assert result["status"] == "canceled"
+    assert len([item for item in client.calls if item[0] == "cancel"]) == 1
+
+
+def test_probe_cancel_without_terminal_confirmation_is_uncertain():
+    client = FakeClient(orders=[])
+    clock = FakeClock()
+    original_call = client.call
+
+    def call(fn, *args):
+        if fn == "get_trade_detail_data" and args[2] == "order":
+            remark = [c for c in client.calls if c[0] == "passorder"][0][1][9]
+            client.orders = [_order(remark, status=50)]
+        return original_call(fn, *args)
+
+    client.call = call
+    result = run_trade_probe(
+        client, "80391000", "510300.SH", 100, 4.5,
+        timeout=0.3, poll_interval=0.1, clock=clock, sleep=clock.sleep,
+    )
+
+    assert result["status"] == "uncertain"
+    assert "撤单" in result["reason"]
+    assert len([item for item in client.calls if item[0] == "cancel"]) == 1
 
 
 def test_probe_recognizes_terminal_fill_and_does_not_cancel():

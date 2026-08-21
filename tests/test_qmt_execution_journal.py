@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
+import time
 from datetime import datetime
 
 import pytest
@@ -151,6 +153,9 @@ def test_existing_submitting_state_is_recovered_as_uncertain_without_call(
     called = []
     monkeypatch.setattr(rpc_server, "save_execution", lambda _value: None)
     monkeypatch.setattr(rpc_server, "passorder", lambda *args: called.append(args))
+    monkeypatch.setattr(rpc_server, "_collect_orders", lambda _ymd: {})
+    monkeypatch.setattr(rpc_server, "_collect_deals", lambda _ymd: {})
+    monkeypatch.setattr(rpc_server, "RPC_RECOVERY_QUERY_TIMEOUT", 0.01)
 
     result = rpc_server.submit_execution(object(), execution)
 
@@ -159,17 +164,108 @@ def test_existing_submitting_state_is_recovered_as_uncertain_without_call(
     assert "重启" in result["orders"][0]["error"]
 
 
+def test_restart_recovers_existing_order_before_submitting_remaining_plan(
+        monkeypatch):
+    execution = _planned_execution()
+    first = execution["orders"][0]
+    first["status"] = "submitting"
+    second = copy.deepcopy(first)
+    second.update(sequence=2, remark="alpha#20260821#2", status="planned")
+    execution["orders"] = [first, second]
+    execution["status"] = "submitting"
+    submitted = []
+    monkeypatch.setattr(rpc_server, "save_execution", lambda _value: None)
+    monkeypatch.setattr(
+        rpc_server, "_collect_orders",
+        lambda _ymd: {"alpha": [{
+            "remark": first["remark"], "symbol": "510300",
+            "order_sys_id": "O1", "status_raw": 50, "qty": 100,
+            "traded_qty": 0, "cancel_qty": 0, "price": 4.81,
+        }]},
+    )
+    monkeypatch.setattr(rpc_server, "_collect_deals", lambda _ymd: {})
+    monkeypatch.setattr(
+        rpc_server, "passorder", lambda *args: submitted.append(args) or 0
+    )
+
+    result = rpc_server.submit_execution(object(), execution)
+
+    assert result["orders"][0]["status"] == "accepted"
+    assert [args[9] for args in submitted] == [second["remark"]]
+
+
+def test_restart_missing_submitted_order_becomes_uncertain_and_stops_plan(
+        monkeypatch):
+    execution = _planned_execution()
+    first = execution["orders"][0]
+    first["status"] = "submitted"
+    second = copy.deepcopy(first)
+    second.update(sequence=2, remark="alpha#20260821#2", status="planned")
+    execution["orders"] = [first, second]
+    execution["status"] = "submitted"
+    submitted = []
+    monkeypatch.setattr(rpc_server, "save_execution", lambda _value: None)
+    monkeypatch.setattr(rpc_server, "_collect_orders", lambda _ymd: {})
+    monkeypatch.setattr(rpc_server, "_collect_deals", lambda _ymd: {})
+    monkeypatch.setattr(rpc_server, "RPC_RECOVERY_QUERY_TIMEOUT", 0.01)
+    monkeypatch.setattr(
+        rpc_server, "passorder", lambda *args: submitted.append(args)
+    )
+
+    result = rpc_server.submit_execution(object(), execution)
+
+    assert submitted == []
+    assert result["status"] == "uncertain"
+    assert result["orders"][0]["status"] == "uncertain"
+    assert result["orders"][1]["status"] == "planned"
+
+
+def test_restart_recovery_uses_deadline_window_not_fixed_attempt_count(
+        monkeypatch):
+    execution = _planned_execution()
+    execution["orders"][0]["status"] = "submitted"
+    execution["status"] = "submitted"
+    values = {"now": 0.0, "queries": 0}
+
+    def clock():
+        return values["now"]
+
+    def sleep(seconds):
+        values["now"] += seconds
+
+    def orders(_ymd):
+        values["queries"] += 1
+        return {}
+
+    monkeypatch.setattr(rpc_server, "_collect_orders", orders)
+    monkeypatch.setattr(rpc_server, "_collect_deals", lambda _ymd: {})
+    monkeypatch.setattr(rpc_server, "save_execution", lambda _value: None)
+
+    result = rpc_server._recover_submission_state(
+        execution, timeout=1.0, interval=0.2, clock=clock, sleep=sleep
+    )
+
+    assert values["now"] == pytest.approx(1.0)
+    assert values["queries"] >= 5
+    assert result["status"] == "uncertain"
+
+
 def test_publish_rejects_replacement_after_submission_started(tmp_path, monkeypatch):
     monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
     original = _payload()
-    rpc_server._publish_targets(original)
+    rpc_server._publish_targets(
+        original, now=datetime(2026, 8, 21, 14, 45)
+    )
     execution = _planned_execution()
     execution["checksum"] = original["checksum"]
     execution["status"] = "submitting"
     rpc_server.save_execution(execution)
 
     with pytest.raises(ValueError, match="执行已开始"):
-        rpc_server._publish_targets(_payload(targets={"510300": 0.4}))
+        rpc_server._publish_targets(
+            _payload(targets={"510300": 0.4}),
+            now=datetime(2026, 8, 21, 14, 45),
+        )
 
     stored = json.loads(
         (tmp_path / "targets" / "targets_alpha_20260821.json").read_text(
@@ -185,13 +281,79 @@ def test_publish_replacement_discards_unstarted_plan(tmp_path, monkeypatch):
         rpc_server, "load_ledger", lambda *_args: {"cash": 100_000.0, "pos": {}}
     )
     original = _payload()
-    rpc_server._publish_targets(original)
+    rpc_server._publish_targets(
+        original, now=datetime(2026, 8, 21, 14, 45)
+    )
     rpc_server.prepare_execution(original, {"510300": 5.0})
 
-    result = rpc_server._publish_targets(_payload(targets={"510300": 0.4}))
+    result = rpc_server._publish_targets(
+        _payload(targets={"510300": 0.4}),
+        now=datetime(2026, 8, 21, 14, 45),
+    )
 
     assert result["status"] == "replaced"
     assert rpc_server.load_execution("alpha", "2026-08-21") is None
+
+
+def test_rebalance_serializes_target_replacement_until_submission_started(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
+    original = _payload()
+    replacement = _payload(targets={"510300": 0.4})
+    rpc_server._publish_targets(
+        original, now=datetime(2026, 8, 21, 14, 45)
+    )
+    monkeypatch.setattr(rpc_server, "_load_today_targets", lambda _now: [original])
+    monkeypatch.setattr(rpc_server, "_snapshot", lambda: ({}, 0.0, 100_000.0))
+    monkeypatch.setattr(
+        rpc_server, "load_ledger", lambda *_args: {"cash": 100_000.0, "pos": {}}
+    )
+    entered, release = threading.Event(), threading.Event()
+
+    def submit(_C, execution):
+        entered.set()
+        assert release.wait(1)
+        execution["status"] = "submitting"
+        execution["orders"][0]["status"] = "submitting"
+        rpc_server.save_execution(execution)
+        return execution
+
+    monkeypatch.setattr(rpc_server, "submit_execution", submit)
+    C = type("C", (), {
+        "get_full_tick": lambda self, codes: {
+            code: {"lastPrice": 5.0} for code in codes
+        }
+    })()
+    rebalance = threading.Thread(target=rpc_server.do_rebalance, args=(C,))
+    rebalance.start()
+    assert entered.wait(1)
+
+    outcome = {}
+
+    def publish_replacement():
+        try:
+            rpc_server._publish_targets(
+                replacement, now=datetime(2026, 8, 21, 14, 45)
+            )
+        except Exception as exc:  # 测试线程把结果带回主线程断言
+            outcome["error"] = exc
+
+    publisher = threading.Thread(target=publish_replacement)
+    publisher.start()
+    time.sleep(0.05)
+    assert publisher.is_alive(), "替换必须等待调仓临界区结束"
+    release.set()
+    rebalance.join(1)
+    publisher.join(1)
+
+    assert isinstance(outcome.get("error"), ValueError)
+    assert "执行已开始" in str(outcome["error"])
+    stored = json.loads(
+        (tmp_path / "targets" / "targets_alpha_20260821.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert stored["checksum"] == original["checksum"]
 
 
 def test_do_rebalance_only_prepares_and_submits_journal(monkeypatch):

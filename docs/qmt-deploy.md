@@ -48,6 +48,7 @@ New-Item -ItemType Directory -Force -Path $configDir | Out-Null
     token = $rpcToken
     allow_trade = $true
     allow_ips = @('替换为本机出口IP')
+    recovery_query_timeout = 5.0
   }
   live_push = @{enable = $true; period = '5nSecond'}
 } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 $configPath
@@ -71,7 +72,9 @@ QMT 一次清理；此后使用新版脚本即可直接热重启模型。
 状态在 `SHARE_DIR/state/`),差额各算各的、备注各打各的。每个执行日另有
 `SHARE_DIR/executions/execution_{策略}_{YYYYMMDD}.json`，在调用 `passorder`
 之前先落 `submitting`。重启遇到无法证明是否已经报出的窗口会标为
-`uncertain` 并停止自动重报，避免重复订单。
+`uncertain` 并停止自动重报，避免重复订单；重启恢复会先按备注查询柜台委托/
+成交，确认已有记录后才继续剩余计划。RPC 替换 targets 与调仓共用同一临界区，
+因此不会出现“文件已换新目标、实际仍下旧目标”的交错。
 QMT 要求投资备注少于 24 字符，因此新备注只保存策略/日期哈希与序号，完整身份
 由 execution journal 反查；旧版长备注仍兼容读取。
 
@@ -83,8 +86,10 @@ orders  = 提交过程与柜台委托状态
 fills   = QMT 返回的实际 deals（只有它会改变策略账本）
 ```
 
-`passorder` 返回不再被当作成交。零成交同样写 fills，部分成交只按实际数量和
-价格更新账本；废单、撤单和未决状态保留在 `orders`，不会污染 `fills`。
+`passorder` 返回不再被当作成交。零成交同样写 fills，部分成交只按实际成交额和
+手续费更新账本（旧 QMT 字段拼写也兼容）；废单、撤单和未决状态保留在
+`orders`，不会污染 `fills`。发布与加载都会校验 `generated_at`，拒绝缺失、
+超过 8 小时或超前 5 分钟以上的目标。
 
 ## 二、远程访问安全模型(必读)
 
@@ -200,13 +205,15 @@ python3 scripts/publish_targets.py --pull \
   var/runtime/targets/targets_combo_turtle_xsmom_x2_20260821.json
 ```
 
-服务端自己构造文件名并校验策略名、日期、checksum 和大小。相同 checksum 返回
-`duplicate`；执行开始前可替换目标，进入 `submitting` 后不同 checksum 会被拒绝。
+服务端自己构造文件名并校验策略名、日期、checksum 和大小。完整 payload 相同才
+返回 `duplicate`；即使权重 checksum 相同，只要生成时间或算法参数变化也按替换
+处理。执行开始前可替换目标，进入 `submitting` 后任何变更都会被拒绝。
 因此远程模式不依赖 Mac 与 Windows 之间另设目录同步，RPC 发布是 targets 的权威
 传输路径；本地原文件仍是可审计意图。
 
 仿真账号首次上线，用独立探针验证一次真实报单路径。它会提交一笔指定价委托，
-按短唯一备注查询，取得可撤委托号后立即请求撤单；超时或异常绝不重新报单：
+按短唯一备注查询，取得可撤委托号后请求撤单并持续查询到撤单/成交/拒单终态；
+未确认终态、超时或异常均返回 `uncertain`，绝不重新报单：
 
 ```bash
 python3 scripts/qmt_trade_probe.py \

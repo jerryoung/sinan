@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -11,6 +11,13 @@ from qmt_shell import sinan_qmt as rpc_server
 from sinan.config import LiveProfileCfg, LiveProfilesCfg, QmtRpcCfg
 from sinan.live.qmt_bridge import PublishResult, QmtRpcBridge
 from sinan.live.targets import targets_checksum
+
+
+_NOW = datetime(2026, 8, 21, 14, 45)
+
+
+def _publish(payload):
+    return rpc_server._publish_targets(payload, now=_NOW)
 
 
 def _payload(strategy="alpha", date="2026-08-21", targets=None, **extra):
@@ -32,8 +39,8 @@ def test_publish_targets_is_idempotent(tmp_path, monkeypatch):
     monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
     payload = _payload()
 
-    first = rpc_server._publish_targets(payload)
-    second = rpc_server._publish_targets(payload)
+    first = _publish(payload)
+    second = _publish(payload)
 
     assert first == {
         "status": "accepted", "strategy": "alpha", "date": "2026-08-21",
@@ -51,8 +58,8 @@ def test_publish_targets_replaces_unstarted_payload_atomically(tmp_path, monkeyp
     first = _payload(targets={"510300": 0.5})
     second = _payload(targets={"510300": 0.4})
 
-    rpc_server._publish_targets(first)
-    result = rpc_server._publish_targets(second)
+    _publish(first)
+    result = _publish(second)
 
     assert result["status"] == "replaced"
     stored = json.loads(
@@ -60,6 +67,24 @@ def test_publish_targets_replaces_unstarted_payload_atomically(tmp_path, monkeyp
     )
     assert stored == second
     assert not list((tmp_path / "targets").glob("*.tmp"))
+
+
+def test_publish_targets_refreshes_changed_payload_even_with_same_weight_checksum(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
+    first_now = datetime(2026, 8, 21, 14, 45)
+    second_now = first_now + timedelta(hours=9)
+    first = _payload(generated_at=first_now.isoformat())
+    second = _payload(generated_at=second_now.isoformat())
+
+    rpc_server._publish_targets(first, now=first_now)
+    result = rpc_server._publish_targets(second, now=second_now)
+
+    assert result["status"] == "replaced"
+    stored = json.loads(
+        (tmp_path / "targets" / result["filename"]).read_text(encoding="utf-8")
+    )
+    assert stored["generated_at"] == second["generated_at"]
 
 
 @pytest.mark.parametrize("strategy", [
@@ -70,7 +95,7 @@ def test_publish_targets_rejects_unsafe_strategy(strategy, tmp_path, monkeypatch
     monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
 
     with pytest.raises(ValueError, match="策略"):
-        rpc_server._publish_targets(_payload(strategy=strategy))
+        _publish(_payload(strategy=strategy))
 
     assert not (tmp_path / "targets").exists()
 
@@ -79,13 +104,13 @@ def test_publish_targets_rejects_unsafe_strategy(strategy, tmp_path, monkeypatch
 def test_publish_targets_rejects_invalid_date(day, tmp_path, monkeypatch):
     monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
     with pytest.raises(ValueError, match="日期"):
-        rpc_server._publish_targets(_payload(date=day))
+        _publish(_payload(date=day))
 
 
 def test_publish_targets_rejects_checksum_mismatch(tmp_path, monkeypatch):
     monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
     with pytest.raises(ValueError, match="checksum"):
-        rpc_server._publish_targets(_payload(checksum="0" * 64))
+        _publish(_payload(checksum="0" * 64))
 
 
 @pytest.mark.parametrize("targets", [
@@ -96,7 +121,25 @@ def test_publish_targets_rejects_weights_outside_long_only_budget(
         targets, tmp_path, monkeypatch):
     monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
     with pytest.raises(ValueError, match="权重|总权重"):
-        rpc_server._publish_targets(_payload(targets=targets))
+        _publish(_payload(targets=targets))
+
+
+@pytest.mark.parametrize("generated_at", [
+    None,
+    (_NOW - timedelta(hours=9)).isoformat(),
+    (_NOW + timedelta(minutes=6)).isoformat(),
+])
+def test_publish_targets_rejects_missing_stale_or_future_generation_time(
+        generated_at, tmp_path, monkeypatch):
+    monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
+    payload = _payload()
+    if generated_at is None:
+        payload.pop("generated_at")
+    else:
+        payload["generated_at"] = generated_at
+
+    with pytest.raises(ValueError, match="generated_at|时效|未来"):
+        _publish(payload)
 
 
 def test_qmt_loader_rejects_payload_identity_that_does_not_match_filename(
@@ -112,16 +155,31 @@ def test_qmt_loader_rejects_payload_identity_that_does_not_match_filename(
     assert "跳过" in capsys.readouterr().out
 
 
+def test_qmt_loader_rejects_target_generated_too_far_in_future(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
+    directory = tmp_path / "targets"
+    directory.mkdir()
+    payload = _payload(generated_at="2026-08-21T14:51:00")
+    (directory / "targets_alpha_20260821.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    assert rpc_server._load_today_targets(_NOW) == []
+    assert "未来" in capsys.readouterr().out
+
+
 def test_publish_targets_rejects_oversized_payload(tmp_path, monkeypatch):
     monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
     with pytest.raises(ValueError, match="过大"):
-        rpc_server._publish_targets(_payload(note="x" * (1024 * 1024)))
+        _publish(_payload(note="x" * (1024 * 1024)))
 
 
 def test_publish_endpoint_is_local_immediate_and_respects_readonly(tmp_path,
                                                                   monkeypatch):
     monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
-    payload = _payload(filename="../../chosen-by-client.json")
+    payload = _payload(filename="../../chosen-by-client.json",
+                       generated_at=datetime.now().isoformat(timespec="seconds"))
 
     with pytest.raises(PermissionError, match="只读通道"):
         rpc_server.dispatch({}, object(), "rpc.publish_targets", [payload], {}, False)

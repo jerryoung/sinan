@@ -62,10 +62,12 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   远端执行只能由独立 `scripts/publish_targets.py` 显式发布。薄壳在
   `executions/execution_{策略}_{YYYYMMDD}.json` 先持久化 baseline 与
   `planned → submitting → submitted/uncertain` 状态，再调用 `passorder`；
-  `uncertain` 不得自动重报。事实分层固定为 `targets=意图`、`orders=提交/柜台状态`、
+  重启先按 remark 查询柜台，`uncertain` 不得自动重报；targets 发布/调仓共用
+  临界区，且生成时间缺失、过期或明显超前均拒绝。事实分层固定为
+  `targets=意图`、`orders=提交/柜台状态`、
   `fills=实际 deals`，只有去重后的真实 deal 能改变策略账本。薄壳回写
   `fills_{策略名}_{YYYYMMDD}.json`(含 execution_status、orders、实际 fills、
-  trade_mode、total_asset、positions)——
+  trade_mode、total_asset、positions；账本现金按实际成交额和手续费重演)——
   看板与 run_signal 的持仓真相来源;文件名一律经 `targets.targets_path()`
   构造,不要再手拼。**对账接线在次日出信号时**:run_signal 用
   `reconcile_fills` 比对上一执行日的 targets vs fills,结论写进当日 payload
@@ -76,7 +78,8 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
 - **QMT 服务器机器配置**:固定从 `C:\sinan\config\qmt.json` 读取共享目录、
   实盘推送、RPC、Token 与 IP 白名单；文件缺失时薄壳自动生成
   `rpc.enable=false` 的安全默认配置。私有值不得写回 `sinan_qmt.py`、仓库、日志或
-  runtime 同步目录；修改 JSON 后停止并重新启动 QMT 策略生效。RPC 协议 v2
+  runtime 同步目录；`rpc.recovery_query_timeout` 控制重启后按备注等待柜台缓存的
+  最长秒数(默认 5)；修改 JSON 后停止并重新启动 QMT 策略生效。RPC 协议 v2
   把 QMT C++ API 调用放入策略线程请求泵，socket 后台线程只处理健康、targets
   原子发布和状态文件读取。绑定仿真账号仍须把模型切为“实盘运行”才能触发报单；
   QMT 界面模式不可稳定检测，普通 readiness 严禁下单，显式交易探针才可验证。

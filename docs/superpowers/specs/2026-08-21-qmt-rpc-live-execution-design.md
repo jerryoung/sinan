@@ -183,7 +183,7 @@ strategy/date/sequence 保存在 execution journal 并建立反向索引；旧�
 
 1. 读取持久化 baseline ledger；
 2. 收集并去重该策略、该执行日的实际 deals；
-3. 从 baseline 按真实成交数量和价格幂等重演；
+3. 从 baseline 按真实成交额和手续费幂等重演（金额缺失时才回退数量×价格）；
 4. 原子保存策略 ledger；
 5. 写 `fills_{策略}_{YYYYMMDD}.json`。
 

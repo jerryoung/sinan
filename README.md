@@ -114,7 +114,8 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
   `fills = 实际 deals`。只有 fills 改变策略账本；零成交也写回对账文件，
   部分成交按真实数量/价格幂等重演。`run_signal` 永不发布或下单，远端执行必须
   单独运行 `scripts/publish_targets.py`。QMT 报单前先写 execution journal；
-  重启窗口无法证明是否已报单时标为 `uncertain`，绝不盲目重报。
+  重启先按备注查询柜台，无法证明是否已报单时标为 `uncertain`，绝不盲目重报；
+  账本只按真实成交额和手续费更新。
 - **策略调用**:引擎与 run_signal 一律走 `call_strategy(cfg, ctx)`(调用约定的
   唯一实现);ctx 可见列由 `SignalContext` 统一裁到后复权 OHLCV,两侧恒等。
   dca 的计划起始日在回测中以回测窗口起点为准(配置 `start` 只锚定影子/实盘),

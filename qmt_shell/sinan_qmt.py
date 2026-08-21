@@ -68,6 +68,7 @@ RPC_PORT = 58620
 RPC_TOKEN = ""               # 仅为安全缺省；实际值只放 qmt.json
 RPC_ALLOW_TRADE = True       # 是否允许 passorder/cancel
 RPC_ALLOW_IPS = []           # 单 IP 或 CIDR(100.64.0.0/10)
+RPC_RECOVERY_QUERY_TIMEOUT = 5.0  # 重启后按备注等待柜台缓存的最长秒数
 
 LIVE_PUSH_ENABLE = True
 LIVE_PUSH_PERIOD = "5nSecond"
@@ -88,6 +89,7 @@ _RPC_REQUEST_MAX_BYTES = 1024 * 1024
 _RPC_QUEUE_SIZE = 64
 _RPC_PUMP_LIMIT = 8
 _RPC_CALL_TIMEOUT = 20.0
+_TARGET_FUTURE_SKEW_SECONDS = 300
 _RPC_API_QUEUE = queue.Queue(maxsize=_RPC_QUEUE_SIZE)
 _PUBLISH_LOCK = threading.Lock()
 _EXECUTION_LOCK = threading.RLock()
@@ -112,6 +114,7 @@ def _default_local_config():
             "token": "",
             "allow_trade": True,
             "allow_ips": [],
+            "recovery_query_timeout": 5.0,
         },
         "live_push": {"enable": True, "period": "5nSecond"},
     }
@@ -172,6 +175,12 @@ def _validate_local_config(cfg):
             raise QmtConfigError("rpc.allow_ips 包含无效 IP/CIDR")
         clean_ips.append(entry)
     rpc["allow_ips"] = clean_ips
+    timeout = rpc["recovery_query_timeout"]
+    if (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or
+            not math.isfinite(float(timeout)) or not 0 < float(timeout) <= 60):
+        raise QmtConfigError(
+            "rpc.recovery_query_timeout 必须在 0..60 秒之间")
+    rpc["recovery_query_timeout"] = float(timeout)
 
     live = cfg["live_push"]
     _require_bool(live["enable"], "live_push.enable")
@@ -218,7 +227,7 @@ def load_local_config(path=QMT_CONFIG_PATH):
 def _apply_local_config(cfg):
     """把启动快照接入现有薄壳变量；调用方无需了解配置文件结构。"""
     global SHARE_DIR, RPC_ENABLE, RPC_HOST, RPC_PORT, RPC_TOKEN
-    global RPC_ALLOW_TRADE, RPC_ALLOW_IPS
+    global RPC_ALLOW_TRADE, RPC_ALLOW_IPS, RPC_RECOVERY_QUERY_TIMEOUT
     global LIVE_PUSH_ENABLE, LIVE_PUSH_PERIOD
     SHARE_DIR = cfg["share_dir"]
     rpc = cfg["rpc"]
@@ -228,6 +237,7 @@ def _apply_local_config(cfg):
     RPC_TOKEN = rpc["token"]
     RPC_ALLOW_TRADE = rpc["allow_trade"]
     RPC_ALLOW_IPS = list(rpc["allow_ips"])
+    RPC_RECOVERY_QUERY_TIMEOUT = rpc["recovery_query_timeout"]
     live = cfg["live_push"]
     LIVE_PUSH_ENABLE = live["enable"]
     LIVE_PUSH_PERIOD = live["period"]
@@ -356,6 +366,20 @@ def _validate_target_payload(payload):
     return clean
 
 
+def _validate_target_freshness(payload, now):
+    """统一校验 targets 生成时间，拒绝陈旧值和明显的未来时钟。"""
+    if not payload.get("generated_at"):
+        raise ValueError("targets generated_at 缺失")
+    generated = _parse_iso_datetime(payload["generated_at"])
+    age = (now - generated).total_seconds()
+    if age < -_TARGET_FUTURE_SKEW_SECONDS:
+        raise ValueError("targets generated_at 位于未来:%s"
+                         % payload["generated_at"])
+    if age > MAX_AGE_HOURS * 3600:
+        raise ValueError("targets 超出时效:%s" % payload["generated_at"])
+    return generated
+
+
 def _atomic_write_json(path, payload):
     """同目录临时文件 + replace，避免 QMT 在半写状态读取 targets。"""
     parent = os.path.dirname(path)
@@ -378,6 +402,7 @@ def _atomic_write_json(path, payload):
 def _publish_targets(payload, now=None):
     """接收一份显式发布的 targets；同 checksum 重复请求不重复写入。"""
     clean = _validate_target_payload(payload)
+    _validate_target_freshness(clean, now or datetime.now())
     strategy = clean["strategy"]
     day = clean["date"]
     checksum = clean["checksum"]
@@ -394,7 +419,7 @@ def _publish_targets(payload, now=None):
             old = _validate_target_payload(old)
             if old["strategy"] != strategy or old["date"] != day:
                 raise ValueError("已有 targets 身份字段不符")
-            if old.get("checksum") == checksum:
+            if old == clean:
                 status = "duplicate"
             else:
                 with _EXECUTION_LOCK:
@@ -434,9 +459,7 @@ def _load_today_targets(now):
             expected = "targets_%s_%s.json" % (p["strategy"], ymd)
             if name != expected:
                 raise ValueError("文件名与 targets 身份不符")
-            gen = _parse_iso_datetime(p["generated_at"])
-            if (now - gen).total_seconds() > MAX_AGE_HOURS * 3600:
-                raise ValueError("超出时效: %s" % p["generated_at"])
+            _validate_target_freshness(p, now)
             if STRATEGIES and p.get("strategy") not in STRATEGIES:
                 print("[sinan] 跳过 %s: 不在本壳 STRATEGIES 服务列表" % name)
                 continue
@@ -646,15 +669,15 @@ def prepare_execution(payload, prices, now=None):
 
 def submit_execution(C, execution):
     """按日志逐笔最多提交一次；不确定窗口绝不自动重报。"""
+    if any(o.get("status") in ("submitting", "submitted")
+           for o in execution.get("orders") or []):
+        execution = _recover_submission_state(execution)
+        if any(o.get("status") in ("uncertain", "unreadable")
+               for o in execution.get("orders") or []):
+            return execution
     for order in execution.get("orders") or []:
         with _EXECUTION_LOCK:
             status = order.get("status", "planned")
-            if status == "submitting":
-                order["status"] = "uncertain"
-                order["error"] = "模型重启时委托处于 submitting，无法证明是否已报单"
-                execution["status"] = "uncertain"
-                save_execution(execution)
-                return execution
             if status == "uncertain":
                 execution["status"] = "uncertain"
                 return execution
@@ -691,15 +714,63 @@ def submit_execution(C, execution):
         execution["status"] = "submitted"
         save_execution(execution)
     elif all(o.get("status") != "planned" for o in execution["orders"]):
-        execution["status"] = ("uncertain" if any(
-            o.get("status") == "uncertain" for o in execution["orders"])
-            else "submitted")
+        execution["status"] = _execution_state(
+            [o.get("status", "submitted") for o in execution["orders"]])
         save_execution(execution)
     return execution
 
 
+def _recover_submission_state(execution, timeout=None, interval=0.25,
+                              clock=None, sleep=None):
+    """重启后先向柜台按备注求证；无法证明的副作用一律转 uncertain。"""
+    clock = clock or time.monotonic
+    sleep = sleep or time.sleep
+    timeout = (RPC_RECOVERY_QUERY_TIMEOUT if timeout is None
+               else float(timeout))
+    deadline = clock() + max(0.0, timeout)
+    strategy = execution["strategy"]
+    ymd = execution["date"].replace("-", "")
+    pending = {o.get("remark") for o in execution.get("orders") or []
+               if o.get("status") in ("submitting", "submitted")}
+    orders, deals, query_error = [], [], None
+    while True:
+        try:
+            orders = _collect_orders(ymd).get(strategy, [])
+            deals = _collect_deals(ymd).get(strategy, [])
+            observed = {row.get("remark") for row in orders + deals}
+            if pending.issubset(observed):
+                break
+        except Exception as e:                 # 查询失败也不能猜测未报
+            query_error = "%s: %s" % (type(e).__name__, e)
+            break
+        remaining = deadline - clock()
+        if remaining <= 0:
+            break
+        sleep(min(float(interval), remaining))
+
+    original_pending = set(pending)
+    result = _reconcile_execution(execution, orders, deals)
+    recovered = result["execution"]
+    for order in recovered.get("orders") or []:
+        if (order.get("remark") in original_pending and
+                order.get("status") in ("submitting", "submitted")):
+            order["status"] = "uncertain"
+            detail = query_error or "柜台未找到对应备注的委托或成交"
+            order["error"] = "模型重启后无法证明是否已报单:%s" % detail
+    recovered["status"] = _execution_state(
+        [o.get("status", "submitted") for o in recovered.get("orders") or []])
+    save_execution(recovered)
+    return recovered
+
+
 # ══════════════════════ 调仓与回写 ══════════════════════
 def do_rebalance(C):
+    """发布与调仓共用临界区，保证执行的 checksum 与落盘 targets 一致。"""
+    with _PUBLISH_LOCK:
+        return _do_rebalance_locked(C)
+
+
+def _do_rebalance_locked(C):
     now = datetime.now()
     payloads = _load_today_targets(now)
     if not payloads:
@@ -837,6 +908,11 @@ def _collect_deals(ymd):
                     obj, ("m_nVolume", "m_nTradeVolume"), required=True)),
                 "price": float(_read_qmt_attr(
                     obj, ("m_dPrice", "m_dTradePrice"), required=True)),
+                "trade_amount": float(_read_qmt_attr(
+                    obj, ("m_dTradeAmount",), 0.0)),
+                "commission": float(_read_qmt_attr(
+                    obj, ("m_dCommission", "m_dComission", "m_dComssion"),
+                    0.0)),
                 "trade_time": str(trade_time),
             }
         except Exception as e:
@@ -850,7 +926,7 @@ def _deal_key(deal):
     if deal.get("trade_id"):
         return "id:%s" % deal["trade_id"]
     fields = ("order_sys_id", "remark", "symbol", "side", "qty", "price",
-              "trade_time")
+              "trade_amount", "commission", "trade_time")
     return "fallback:" + json.dumps(
         [deal.get(k) for k in fields], ensure_ascii=False, separators=(",", ":"))
 
@@ -870,12 +946,18 @@ def _rebuild_ledger(baseline, deals):
         symbol = _normalize_symbol(deal.get("symbol"))
         side = deal.get("side")
         qty, price = int(deal.get("qty", 0)), float(deal.get("price", 0.0))
-        if not symbol or side not in ("buy", "sell") or qty <= 0 or price <= 0:
+        amount = float(deal.get("trade_amount", 0.0) or qty * price)
+        commission = float(deal.get("commission", 0.0) or 0.0)
+        if (not symbol or side not in ("buy", "sell") or qty <= 0 or
+                price <= 0 or not math.isfinite(amount) or amount <= 0 or
+                not math.isfinite(commission) or commission < 0):
             raise ValueError("成交记录关键字段无效:%r" % deal)
         deal["symbol"] = symbol
+        deal["trade_amount"] = amount
+        deal["commission"] = commission
         sign = 1 if side == "buy" else -1
         ledger["pos"][symbol] = int(ledger["pos"].get(symbol, 0)) + sign * qty
-        ledger["cash"] -= sign * qty * price
+        ledger["cash"] -= sign * amount + commission
         if ledger["pos"][symbol] == 0:
             ledger["pos"].pop(symbol)
         unique.append(deal)

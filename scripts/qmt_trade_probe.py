@@ -18,7 +18,7 @@ from qmt_shell import qmt_sdk  # noqa: E402
 from sinan.config import load_live_profiles  # noqa: E402
 
 _TERMINAL = {53: "canceled", 54: "canceled", 56: "filled", 57: "rejected"}
-_CANCELABLE = {50, 51, 52, 55}
+_CANCELABLE = {48, 49, 50, 51, 52, 55}
 
 
 def _field(obj, name, default=None):
@@ -78,6 +78,7 @@ def run_trade_probe(
                 "reason": "%s: %s" % (type(exc).__name__, exc)}
 
     deadline = clock() + float(timeout)
+    cancel_requested = False
     while clock() < deadline:
         orders = client.call(
             "get_trade_detail_data", account, account_type, "order"
@@ -101,13 +102,19 @@ def run_trade_probe(
             return {"status": _TERMINAL[raw_status], "remark": probe_remark,
                     "order_sys_id": sys_id, "order_status": raw_status,
                     "deal_count": int(deal_count)}
-        if raw_status in _CANCELABLE and sys_id:
-            client.call("cancel", sys_id, account, account_type, "__C__")
-            return {"status": "cancel_requested", "remark": probe_remark,
-                    "order_sys_id": sys_id, "order_status": raw_status}
+        if raw_status in _CANCELABLE and sys_id and not cancel_requested:
+            try:
+                client.call("cancel", sys_id, account, account_type, "__C__")
+            except Exception as exc:
+                return {"status": "uncertain", "remark": probe_remark,
+                        "order_sys_id": sys_id,
+                        "reason": "撤单结果不确定:%s: %s"
+                                  % (type(exc).__name__, exc)}
+            cancel_requested = True
         sleep(float(poll_interval))
     return {"status": "uncertain", "remark": probe_remark,
-            "reason": "等待唯一备注委托超时；未自动重报"}
+            "reason": ("撤单后未确认终态" if cancel_requested
+                       else "等待唯一备注委托超时；未自动重报")}
 
 
 def main(argv: list[str] | None = None) -> int:
