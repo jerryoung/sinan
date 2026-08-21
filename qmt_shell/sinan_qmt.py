@@ -36,9 +36,11 @@ import hmac
 import ipaddress
 import json
 import os
+import queue
 import re
 import socket
 import threading
+import time
 import traceback
 from datetime import datetime
 
@@ -68,6 +70,22 @@ LIVE_PUSH_ENABLE = True
 LIVE_PUSH_PERIOD = "5nSecond"
 
 _TRADE_FNS = {"passorder", "cancel", "cancel_task"}
+_RPC_GLOBAL_FNS = {
+    "get_trade_detail_data", "get_last_order_id", "get_value_by_order_id",
+    "timetag_to_datetime", "passorder", "cancel", "cancel_task",
+}
+_RPC_CONTEXT_FNS = {
+    "get_full_tick", "get_stock_name", "get_market_data_ex",
+    "get_trading_dates", "get_stock_list_in_sector",
+    "get_instrument_detail",
+}
+_RPC_PROTOCOL = 2
+_RPC_CAPABILITIES = ["qmt_api_queue"]
+_RPC_REQUEST_MAX_BYTES = 1024 * 1024
+_RPC_QUEUE_SIZE = 64
+_RPC_PUMP_LIMIT = 8
+_RPC_CALL_TIMEOUT = 20.0
+_RPC_API_QUEUE = queue.Queue(maxsize=_RPC_QUEUE_SIZE)
 _C = None
 _ACCOUNT = {"id": "", "type": "STOCK"}
 _MORNING_LEDGERS = {}        # 用当日成交重算账本的起点
@@ -579,14 +597,20 @@ def to_jsonable(obj, _depth=0):
         return str(obj)
 
 
-def dispatch(namespace, C, fn, args, kwargs, allow_trade=True):
+def _validate_rpc_method(fn):
+    """只暴露司南确实使用的最小 QMT API 面，拒绝任意属性遍历。"""
     if fn == "rpc.health":
-        return {"service": "sinan-qmt-rpc", "protocol": 1,
-                "account": _ACCOUNT["id"], "account_type": _ACCOUNT["type"],
-                "trade_mode": _trade_mode(C), "allow_trade": bool(allow_trade),
-                "server_time": datetime.now().isoformat(timespec="seconds")}
-    if not allow_trade and fn in _TRADE_FNS:
-        raise PermissionError("只读通道(RPC_ALLOW_TRADE=False),拒绝: %s" % fn)
+        return
+    if fn.startswith("C."):
+        if fn[2:] in _RPC_CONTEXT_FNS:
+            return
+    elif fn in _RPC_GLOBAL_FNS:
+        return
+    raise PermissionError("RPC 不允许调用: %s" % fn)
+
+
+def _execute_qmt_call(namespace, C, fn, args, kwargs):
+    """仅由 QMT 策略线程请求泵调用，后台 socket 线程不得直接进入 QMT API。"""
     args = [C if a == "__C__" else a for a in (args or [])]
     kwargs = kwargs or {}
     if fn.startswith("C."):
@@ -598,6 +622,72 @@ def dispatch(namespace, C, fn, args, kwargs, allow_trade=True):
         if target is None:
             raise NameError("QMT 环境无此函数: %s" % fn)
     return to_jsonable(target(*args, **kwargs))
+
+
+def _reset_rpc_queue_for_test():
+    """隔离测试用例；生产启动也可借此丢弃上次模型遗留的内存请求。"""
+    global _RPC_API_QUEUE
+    _RPC_API_QUEUE = queue.Queue(maxsize=_RPC_QUEUE_SIZE)
+
+
+def _submit_api_request(namespace, C, fn, args, kwargs, allow_trade=True,
+                        timeout=_RPC_CALL_TIMEOUT):
+    """socket 线程提交请求并等待 QMT 策略线程执行。"""
+    if not allow_trade and fn in _TRADE_FNS:
+        raise PermissionError("只读通道(RPC_ALLOW_TRADE=False),拒绝: %s" % fn)
+    request = {
+        "namespace": namespace,
+        "context": C,
+        "fn": fn,
+        "args": args or [],
+        "kwargs": kwargs or {},
+        "event": threading.Event(),
+        "result": None,
+        "error": None,
+        "deadline": time.monotonic() + float(timeout),
+    }
+    try:
+        _RPC_API_QUEUE.put_nowait(request)
+    except queue.Full:
+        raise RuntimeError("QMT API 请求队列已满")
+    if not request["event"].wait(float(timeout)):
+        raise TimeoutError("QMT API 调用超时: %s" % fn)
+    if request["error"] is not None:
+        raise request["error"]
+    return request["result"]
+
+
+def do_rpc_pump(C):
+    """QMT 策略线程定时回调：串行执行由 RPC 后台线程提交的 API 请求。"""
+    for _ in range(_RPC_PUMP_LIMIT):
+        try:
+            request = _RPC_API_QUEUE.get_nowait()
+        except queue.Empty:
+            return
+        try:
+            if time.monotonic() > request["deadline"]:
+                raise TimeoutError("QMT API 请求等待执行已超时: %s"
+                                   % request["fn"])
+            request["result"] = _execute_qmt_call(
+                request["namespace"], request.get("context") or C,
+                request["fn"], request["args"], request["kwargs"])
+        except Exception as e:                 # noqa: BLE001
+            request["error"] = e
+        finally:
+            request["event"].set()
+            _RPC_API_QUEUE.task_done()
+
+
+def dispatch(namespace, C, fn, args, kwargs, allow_trade=True):
+    if fn == "rpc.health":
+        return {"service": "sinan-qmt-rpc", "protocol": _RPC_PROTOCOL,
+                "capabilities": list(_RPC_CAPABILITIES),
+                "account": _ACCOUNT["id"], "account_type": _ACCOUNT["type"],
+                "trade_mode": _trade_mode(C), "allow_trade": bool(allow_trade),
+                "server_time": datetime.now().isoformat(timespec="seconds")}
+    _validate_rpc_method(fn)
+    return _submit_api_request(namespace, C, fn, args, kwargs,
+                               allow_trade=allow_trade)
 
 
 def _token_ok(supplied, token):
@@ -639,6 +729,8 @@ def _handle(conn, addr, namespace, C, token, allow_trade, allow_ips):
             buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
+                if len(line) > _RPC_REQUEST_MAX_BYTES:
+                    return
                 if not line.strip():
                     continue
                 rid = None
@@ -659,6 +751,8 @@ def _handle(conn, addr, namespace, C, token, allow_trade, allow_ips):
                                              default=str) + "\n").encode("utf-8"))
                 except OSError:
                     return
+            if len(buf) > _RPC_REQUEST_MAX_BYTES:
+                return
 
 
 def _make_server_socket():
@@ -731,6 +825,9 @@ def init(C):
             _RPC_SERVER = serve(
                 globals(), C, host=RPC_HOST, port=RPC_PORT, token=RPC_TOKEN,
                 allow_trade=RPC_ALLOW_TRADE, allow_ips=RPC_ALLOW_IPS)
+            _reset_rpc_queue_for_test()
+            C.run_time("do_rpc_pump", "1nSecond",
+                       "2026-01-01 09:00:00", "SH")
         except (OSError, ValueError) as e:
             _RPC_SERVER = None
             print("[rpc] RPC 未启动:%s" % e)

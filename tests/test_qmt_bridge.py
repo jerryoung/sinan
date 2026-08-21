@@ -5,6 +5,8 @@ ContextInfo 在本地起真实 socket 服务,SDK 走完整协议往返。
 """
 import json
 import socket
+import threading
+import time
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -90,6 +92,98 @@ def test_sdk_close_releases_reader_before_socket_shutdown():
         "socket.close",
     ]
     assert client._rf is None and client._sock is None
+
+
+def test_qmt_api_request_runs_only_when_pump_drains_queue():
+    rpc_server._reset_rpc_queue_for_test()
+    seen = []
+    result = {}
+    namespace = {
+        "get_trade_detail_data": lambda *args: seen.append(args) or ["ok"]
+    }
+    C = object()
+
+    worker = threading.Thread(
+        target=lambda: result.update(
+            value=rpc_server._submit_api_request(
+                namespace, C, "get_trade_detail_data",
+                ["a", "STOCK", "order"], {}, True, 1.0,
+            )
+        )
+    )
+    worker.start()
+    time.sleep(0.02)
+
+    assert seen == []
+    rpc_server.do_rpc_pump(C)
+    worker.join(1)
+    assert result["value"] == ["ok"]
+    assert seen == [("a", "STOCK", "order")]
+
+
+def test_qmt_api_request_times_out_without_pump():
+    rpc_server._reset_rpc_queue_for_test()
+
+    with pytest.raises(TimeoutError, match="超时"):
+        rpc_server._submit_api_request(
+            {}, object(), "get_trade_detail_data", [], {}, True, 0.01
+        )
+
+
+def test_rpc_health_v2_is_direct_and_advertises_current_capability():
+    rpc_server._reset_rpc_queue_for_test()
+
+    health = rpc_server.dispatch({}, object(), "rpc.health", [], {}, True)
+
+    assert health["protocol"] == 2
+    assert health["capabilities"] == ["qmt_api_queue"]
+    assert rpc_server._RPC_API_QUEUE.empty()
+
+
+@pytest.mark.parametrize("fn", ["eval", "open", "C.set_account", "C.no_such_method"])
+def test_rpc_method_allowlist_rejects_unapproved_names(fn):
+    with pytest.raises(PermissionError, match="不允许"):
+        rpc_server._validate_rpc_method(fn)
+
+
+@pytest.mark.parametrize("fn", [
+    "get_trade_detail_data", "get_last_order_id", "get_value_by_order_id",
+    "timetag_to_datetime", "passorder", "cancel", "cancel_task",
+    "C.get_full_tick", "C.get_stock_name", "C.get_market_data_ex",
+    "C.get_trading_dates", "C.get_stock_list_in_sector",
+    "C.get_instrument_detail",
+])
+def test_rpc_method_allowlist_accepts_repository_contract(fn):
+    rpc_server._validate_rpc_method(fn)
+
+
+class _OversizedRequestConnection:
+    def __init__(self):
+        self.sent = []
+        self._chunks = [b"x" * (1024 * 1024 + 1) + b"\n"]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def recv(self, _size):
+        return self._chunks.pop(0) if self._chunks else b""
+
+    def sendall(self, value):
+        self.sent.append(value)
+
+    def close(self):
+        pass
+
+
+def test_rpc_rejects_request_line_over_one_mib_without_response():
+    conn = _OversizedRequestConnection()
+
+    rpc_server._handle(conn, ("127.0.0.1", 1), {}, object(), "", True, [])
+
+    assert conn.sent == []
 
 
 def test_qmt_rpc_defaults_are_unconfigured_and_trade_enabled():
@@ -270,7 +364,10 @@ def test_init_applies_local_config_to_runtime(monkeypatch):
     rpc_server.init(C)
 
     assert rpc_server.SHARE_DIR == r"D:\sinan\runtime"
-    assert [item[0] for item in C.schedules] == ["do_rebalance", "do_snapshot"]
+    assert [item[0] for item in C.schedules] == [
+        "do_rebalance", "do_snapshot", "do_rpc_pump"
+    ]
+    assert C.schedules[-1][1] == "1nSecond"
     rpc_server.serve.assert_called_once_with(
         rpc_server.__dict__, C,
         host="127.0.0.1", port=60001, token="x" * 32,
@@ -332,6 +429,22 @@ def _fake_get_trade_detail_data(account, acc_type, kind):
     return [_COS()]
 
 
+def _run_test_pump(C, stopped):
+    """测试线程模拟 QMT 的 1 秒策略线程定时回调。"""
+    while not stopped.is_set():
+        rpc_server.do_rpc_pump(C)
+        stopped.wait(0.001)
+
+
+def _start_test_pump(C):
+    stopped = threading.Event()
+    pump = threading.Thread(
+        target=_run_test_pump, args=(C, stopped), daemon=True
+    )
+    pump.start()
+    return stopped, pump
+
+
 @pytest.fixture(scope="module")
 def bridge():
     ns = {"passorder": _fake_passorder,
@@ -340,12 +453,16 @@ def bridge():
     with socket.socket() as probe:              # 找一个空闲端口
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    srv = rpc_server.serve(ns, _FakeC(), host="127.0.0.1", port=port,
+    C = _FakeC()
+    srv = rpc_server.serve(ns, C, host="127.0.0.1", port=port,
                            token="t0k", allow_trade=True)
+    stopped, pump = _start_test_pump(C)
     qmt_sdk.connect("127.0.0.1", port, token="t0k")
     yield
     qmt_sdk._client.close()
     srv.close()
+    stopped.set()
+    pump.join(1)
 
 
 def test_named_api_and_cos_revival(bridge):
@@ -357,7 +474,8 @@ def test_named_api_and_cos_revival(bridge):
 def test_health_reports_rpc_runtime_without_calling_qmt_api(bridge):
     health = qmt_sdk.health()
     assert health["service"] == "sinan-qmt-rpc"
-    assert health["protocol"] == 1
+    assert health["protocol"] == 2
+    assert health["capabilities"] == ["qmt_api_queue"]
     assert health["allow_trade"] is True
     assert health["account_type"] == "STOCK"
 
@@ -375,9 +493,9 @@ def test_context_proxy_and_passorder(bridge):
 def test_generic_fallback_and_errors(bridge):
     # 模块级 __getattr__ 兜底:未显式封装的函数同名转发
     assert qmt_sdk.timetag_to_datetime(0, "%Y") == "2026-08-10 14:45:00"
-    with pytest.raises(qmt_sdk.QmtRpcError, match="无此函数"):
+    with pytest.raises(qmt_sdk.QmtRpcError, match="不允许"):
         qmt_sdk.call("not_exist_fn")
-    with pytest.raises(qmt_sdk.QmtRpcError, match="无方法"):
+    with pytest.raises(qmt_sdk.QmtRpcError, match="不允许"):
         qmt_sdk.C.no_such_method()
 
 
@@ -403,8 +521,10 @@ def test_readonly_channel_blocks_trade_allows_query():
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    srv = rpc_server.serve(ns, _FakeC(), host="127.0.0.1", port=port,
+    C = _FakeC()
+    srv = rpc_server.serve(ns, C, host="127.0.0.1", port=port,
                            token="t", allow_trade=False)
+    stopped, pump = _start_test_pump(C)
     cli = qmt_sdk._Client()
     cli.connect("127.0.0.1", port, token="t")
     assert cli.call("get_trade_detail_data", "a", "STOCK",
@@ -413,6 +533,8 @@ def test_readonly_channel_blocks_trade_allows_query():
         cli.call("passorder", 23, 1101, "a", "x", 5, -1, 100, "", 2, "", "__C__")
     cli.close()
     srv.close()
+    stopped.set()
+    pump.join(1)
 
 
 def test_remote_bind_requires_token_and_allowlist():
