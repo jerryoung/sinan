@@ -174,6 +174,16 @@ def health():
     return call("rpc.health")
 
 
+def publish_targets(payload: dict):
+    """显式发布一份 targets；服务端校验并以策略/日期构造文件名。"""
+    return call("rpc.publish_targets", payload)
+
+
+def execution_status(strategy: str, date: str):
+    """读取指定策略执行日的执行日志与 fills（只读）。"""
+    return call("rpc.execution_status", strategy, date)
+
+
 # ---- 同名常用 API(签名与 QMT 内置一致)----------------------------------
 def passorder(op_type, order_type, account, order_code, pr_type, price,
               volume, strategy_name="", quick_trade=2, user_order_id="",

@@ -136,7 +136,7 @@ def test_rpc_health_v2_is_direct_and_advertises_current_capability():
     health = rpc_server.dispatch({}, object(), "rpc.health", [], {}, True)
 
     assert health["protocol"] == 2
-    assert health["capabilities"] == ["qmt_api_queue"]
+    assert health["capabilities"] == ["qmt_api_queue", "publish_targets"]
     assert rpc_server._RPC_API_QUEUE.empty()
 
 
@@ -475,7 +475,7 @@ def test_health_reports_rpc_runtime_without_calling_qmt_api(bridge):
     health = qmt_sdk.health()
     assert health["service"] == "sinan-qmt-rpc"
     assert health["protocol"] == 2
-    assert health["capabilities"] == ["qmt_api_queue"]
+    assert health["capabilities"] == ["qmt_api_queue", "publish_targets"]
     assert health["allow_trade"] is True
     assert health["account_type"] == "STOCK"
 

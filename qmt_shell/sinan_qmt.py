@@ -35,6 +35,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import math
 import os
 import queue
 import re
@@ -80,12 +81,13 @@ _RPC_CONTEXT_FNS = {
     "get_instrument_detail",
 }
 _RPC_PROTOCOL = 2
-_RPC_CAPABILITIES = ["qmt_api_queue"]
+_RPC_CAPABILITIES = ["qmt_api_queue", "publish_targets"]
 _RPC_REQUEST_MAX_BYTES = 1024 * 1024
 _RPC_QUEUE_SIZE = 64
 _RPC_PUMP_LIMIT = 8
 _RPC_CALL_TIMEOUT = 20.0
 _RPC_API_QUEUE = queue.Queue(maxsize=_RPC_QUEUE_SIZE)
+_PUBLISH_LOCK = threading.Lock()
 _C = None
 _ACCOUNT = {"id": "", "type": "STOCK"}
 _MORNING_LEDGERS = {}        # 用当日成交重算账本的起点
@@ -301,6 +303,97 @@ def _parse_iso_datetime(value):
         except ValueError:
             pass
     raise ValueError("ISO 时间格式错误: %s" % text)
+
+
+def _safe_strategy(value):
+    """把策略 ID 限制为单个安全文件名片段，同时保留合法中文名称。"""
+    strategy = str(value or "")
+    if (not strategy or strategy in (".", "..") or
+            any(ord(ch) < 32 for ch in strategy) or
+            any(ch in '\\/:*?"<>|' for ch in strategy)):
+        raise ValueError("策略名称不安全: %r" % strategy)
+    return strategy
+
+
+def _validate_target_payload(payload):
+    """校验远端发布的不可信 targets，并返回可安全落盘的深拷贝。"""
+    if not isinstance(payload, dict):
+        raise ValueError("targets payload 必须是对象")
+    try:
+        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError) as e:
+        raise ValueError("targets payload 无法序列化: %s" % e)
+    if len(raw.encode("utf-8")) > _RPC_REQUEST_MAX_BYTES:
+        raise ValueError("targets payload 过大")
+    clean = json.loads(raw)
+    clean["strategy"] = _safe_strategy(clean.get("strategy"))
+    day = clean.get("date")
+    if not isinstance(day, str) or not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        raise ValueError("targets 日期必须为 YYYY-MM-DD")
+    try:
+        parsed_day = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError("targets 日期无效: %s" % day)
+    if parsed_day.strftime("%Y-%m-%d") != day:
+        raise ValueError("targets 日期无效: %s" % day)
+    targets = clean.get("targets")
+    if not isinstance(targets, dict):
+        raise ValueError("targets 必须是对象")
+    for symbol, weight in targets.items():
+        if not isinstance(symbol, str) or not symbol:
+            raise ValueError("targets 标的代码必须是非空字符串")
+        if (isinstance(weight, bool) or not isinstance(weight, (int, float)) or
+                not math.isfinite(float(weight))):
+            raise ValueError("targets 权重必须是有限数字: %s" % symbol)
+    if _checksum(targets) != clean.get("checksum"):
+        raise ValueError("targets checksum 不符")
+    return clean
+
+
+def _atomic_write_json(path, payload):
+    """同目录临时文件 + replace，避免 QMT 在半写状态读取 targets。"""
+    parent = os.path.dirname(path)
+    os.makedirs(parent, exist_ok=True)
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def _publish_targets(payload, now=None):
+    """接收一份显式发布的 targets；同 checksum 重复请求不重复写入。"""
+    clean = _validate_target_payload(payload)
+    strategy = clean["strategy"]
+    day = clean["date"]
+    checksum = clean["checksum"]
+    filename = "targets_%s_%s.json" % (strategy, day.replace("-", ""))
+    path = os.path.join(SHARE_DIR, "targets", filename)
+    status = "accepted"
+    with _PUBLISH_LOCK:
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    old = json.load(f)
+            except (OSError, ValueError) as e:
+                raise ValueError("已有 targets 无法读取: %s" % e)
+            if old.get("checksum") == checksum:
+                status = "duplicate"
+            else:
+                status = "replaced"
+                _atomic_write_json(path, clean)
+        else:
+            _atomic_write_json(path, clean)
+    return {"status": status, "strategy": strategy, "date": day,
+            "checksum": checksum, "filename": filename}
 
 
 def _load_today_targets(now):
@@ -685,6 +778,13 @@ def dispatch(namespace, C, fn, args, kwargs, allow_trade=True):
                 "account": _ACCOUNT["id"], "account_type": _ACCOUNT["type"],
                 "trade_mode": _trade_mode(C), "allow_trade": bool(allow_trade),
                 "server_time": datetime.now().isoformat(timespec="seconds")}
+    if fn == "rpc.publish_targets":
+        if not allow_trade:
+            raise PermissionError(
+                "只读通道(RPC_ALLOW_TRADE=False),拒绝: %s" % fn)
+        if kwargs or not isinstance(args, list) or len(args) != 1:
+            raise ValueError("rpc.publish_targets 只接受一个 payload 参数")
+        return _publish_targets(args[0])
     _validate_rpc_method(fn)
     return _submit_api_request(namespace, C, fn, args, kwargs,
                                allow_trade=allow_trade)
