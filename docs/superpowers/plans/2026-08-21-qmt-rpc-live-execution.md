@@ -4,6 +4,10 @@
 
 **Goal:** Build a durable QMT RPC bridge that publishes targets idempotently, tracks real order/deal state, writes fills only from actual deals, and proves the complete flow in the bound simulation account.
 
+**Progress (2026-08-21):** Tasks 1–7 are implemented and locally verified. Task 8 requires
+deploying the updated one-file shell in the user's QMT process and remains an external
+acceptance step; no live-side claim is made from local tests alone.
+
 **Architecture:** Keep `generate_targets` and local targets files unchanged. Add narrow RPC v2 methods for target publication and execution status, persist an execution journal on the QMT machine, and rebuild each strategy ledger from a persisted baseline plus deduplicated QMT deals. Route QMT C++ API calls through a scheduled QMT-thread pump while keeping pure health/file RPC methods in socket workers.
 
 **Tech Stack:** Python 3.6-compatible QMT shell, Python 3 local client, JSON-over-TCP, `threading`/`queue`, Pydantic configuration, pytest, Streamlit.

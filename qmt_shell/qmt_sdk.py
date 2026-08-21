@@ -22,11 +22,13 @@ QMT 内置 Python API 的本地 SDK——经 rpc_server 的 socket 转发调用�
 
 覆盖范围:
   - 同名封装:passorder / get_trade_detail_data / cancel / timetag_to_datetime
-  - ContextInfo 全部方法:qmt.C.<方法名>(...) 通用代理(get_full_tick、
-    get_market_data_ex、subscribe_quote、get_stock_list_in_sector、
-    get_stock_name、get_instrument_detail、get_trading_dates …)
-  - 其余任何内置全局函数:直接 qmt.<函数名>(...)(模块级 __getattr__ 兜底)
-    或 qmt.call("函数名", ...)——协议层通用转发,天然覆盖"全部 API"。
+  - ContextInfo 查询:qmt.C.<方法名>(...) 通用代理(get_full_tick、
+    get_market_data_ex、get_stock_list_in_sector、get_stock_name、
+    get_instrument_detail、get_trading_dates)
+  - 其他司南许可的全局函数可用模块级 __getattr__ 或 qmt.call 同名调用。
+
+服务端协议 v2 采用显式 API 白名单，并把所有 QMT C++ API 调用交给策略线程
+请求泵；未知方法会被拒绝，不能把 RPC 当作任意代码执行通道。
 
 注意:subscribe_quote 的回调函数无法跨进程传递——订阅类接口请在 QMT 侧
 脚本内使用,本 SDK 适合查询与交易类调用(拉取式)。
@@ -165,7 +167,7 @@ def connect_from_settings():
 
 
 def call(fn: str, *args, **kwargs):
-    """通用转发:调用任意 QMT 内置全局函数或 "C.方法名"。"""
+    """通用转发：调用服务端白名单内的全局函数或 "C.方法名"。"""
     return _client.call(fn, *args, **kwargs)
 
 
@@ -210,8 +212,7 @@ def timetag_to_datetime(timetag, fmt="%Y-%m-%d %H:%M:%S"):
 
 
 def __getattr__(name: str):
-    """模块级兜底:任何未封装的内置全局函数按同名直接转发,
-    例如 qmt.get_last_volume(...)。"""
+    """模块级兜底：未显式封装但已获服务端许可的函数按同名转发。"""
     if name.startswith("_"):
         raise AttributeError(name)
     return lambda *a, **kw: call(name, *a, **kw)

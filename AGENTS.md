@@ -18,7 +18,7 @@ Claude Code 经 CLAUDE.md 的 @AGENTS.md 导入。
 无构建系统、无 lint 配置。依赖:`pip install pandas numpy duckdb pyarrow pydantic pyyaml loguru pytest streamlit plotly akshare`
 
 ```bash
-python3 -m pytest tests/ -q                          # 全量测试(277 个)
+python3 -m pytest tests/ -q                          # 全量测试
 python3 -m pytest tests/test_engine.py -q            # 单文件
 python3 -m pytest tests/test_dca.py::test_strategy_yaml -q   # 单测试
 
@@ -34,7 +34,8 @@ streamlit run app.py                                 # 操作面板(外层 .clau
 
 ```
 var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/engine(研究)
-                                                             └→ live/targets → var/runtime/targets/*.json → QMT 薄壳
+                                                             └→ live/targets → 本地 JSON
+                                                                 → 显式 RPC 发布 → QMT 薄壳
 ```
 
 - **核心契约模块**(全线被 import,改签名全局波及):`sinan/config.py`(Settings/
@@ -57,8 +58,14 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
   `data_cutoff`=T−1;checksum 只覆盖权重;`live_profile` 记录命名实盘配置 ID,
   `qmt` 字段是该配置解析出的薄壳兼容参数(`account` 当前薄壳不读,仅留痕、
   为多账号扩展预留);
-  `ref_orders` 仅供参考);薄壳回写 `fills_{策略名}_{YYYYMMDD}.json`(含
-  trade_mode=sim/real 由 QMT 侧上报、total_asset、positions、fills)——
+  `ref_orders` 仅供参考)。`run_signal` 只生成本地 targets，**永不发布或下单**；
+  远端执行只能由独立 `scripts/publish_targets.py` 显式发布。薄壳在
+  `executions/execution_{策略}_{YYYYMMDD}.json` 先持久化 baseline 与
+  `planned → submitting → submitted/uncertain` 状态，再调用 `passorder`；
+  `uncertain` 不得自动重报。事实分层固定为 `targets=意图`、`orders=提交/柜台状态`、
+  `fills=实际 deals`，只有去重后的真实 deal 能改变策略账本。薄壳回写
+  `fills_{策略名}_{YYYYMMDD}.json`(含 execution_status、orders、实际 fills、
+  trade_mode、total_asset、positions)——
   看板与 run_signal 的持仓真相来源;文件名一律经 `targets.targets_path()`
   构造,不要再手拼。**对账接线在次日出信号时**:run_signal 用
   `reconcile_fills` 比对上一执行日的 targets vs fills,结论写进当日 payload
@@ -69,7 +76,10 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
 - **QMT 服务器机器配置**:固定从 `C:\sinan\config\qmt.json` 读取共享目录、
   实盘推送、RPC、Token 与 IP 白名单；文件缺失时薄壳自动生成
   `rpc.enable=false` 的安全默认配置。私有值不得写回 `sinan_qmt.py`、仓库、日志或
-  runtime 同步目录；修改 JSON 后停止并重新启动 QMT 策略生效。
+  runtime 同步目录；修改 JSON 后停止并重新启动 QMT 策略生效。RPC 协议 v2
+  把 QMT C++ API 调用放入策略线程请求泵，socket 后台线程只处理健康、targets
+  原子发布和状态文件读取。绑定仿真账号仍须把模型切为“实盘运行”才能触发报单；
+  QMT 界面模式不可稳定检测，普通 readiness 严禁下单，显式交易探针才可验证。
 - **风险层级**:策略参数 cap/x_risk → 引擎 Σ≤1 + `max_positions`(与 live 共用
   `sinan/risk.py` 的 `limit_positions`:已持仓优先)→ live `apply_risk` 多重裁剪
   → 单标的 34% 兜底。共享风险原语放中立的 `sinan/risk.py`,**研究层不依赖实盘层**。

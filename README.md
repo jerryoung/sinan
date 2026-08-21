@@ -10,7 +10,8 @@
 
 ```
 数据仓(parquet+DuckDB)→ 信号(generate_targets)→ ┬ 回测引擎(研究)
-                                                    └ targets 文件 → QMT 薄壳(执行)
+                                                    └ targets 意图 → 显式 RPC 发布
+                                                                     → QMT 薄壳(执行)
 ```
 
 ## 快速开始
@@ -30,10 +31,14 @@ python3 scripts/run_backtest.py --strategy config/strategies/combo_turtle_xsmom_
 # 3) 影子模式:拉数 → 质检 → 生成当日目标仓位(var/runtime/targets/)
 python3 scripts/shadow_update.py --strategy config/strategies/combo_turtle_xsmom_x2.yaml
 
+# 3.5) 远端执行是独立显式动作；run_signal/shadow_update 本身永不下单
+python3 scripts/publish_targets.py \
+  var/runtime/targets/targets_combo_turtle_xsmom_x2_20260821.json
+
 # 4) 操作面板(数据 → 回测 → 实盘研究工作台)
 streamlit run app.py
 
-# 测试(277 个,含回测快照、事件追踪与实盘配置接线测试)
+# 测试(含回测快照、事件追踪、RPC 与实盘执行契约)
 python3 -m pytest tests/ -q
 ```
 
@@ -48,16 +53,16 @@ sinan/             Python 包(核心代码,与项目同名)
   ├ signal/        SignalContext + 策略注册表 + strategies/(全部策略实现)
   ├ backtest/      engine(逐日循环)· execution_model · costs · report(指标+HTML)
   ├ live/          targets(风控裁剪/留痕/校验)· profiles(实盘配置引用/删除保护)
-  │                · broker · reconcile · notify
+  │                · qmt_bridge(显式发布/拉取)· broker · reconcile · notify
   └ risk.py        组合层风险原语(limit_positions),回测与实盘共用的中立模块
 config/            settings.yaml(本金/路径/执行/风控)· live_profiles.yaml(实盘配置)
                    · rules.yaml(品种规则)· strategies/*.yaml(含 live_profile 引用)
-scripts/           bootstrap / daily_update / shadow_update / run_signal / run_backtest / 研究脚本
+scripts/           bootstrap / daily_update / shadow_update / run_signal / run_backtest
+                   / publish_targets / qmt_trade_probe / 研究脚本
 qmt_shell/         sinan_qmt(ECS 统一脚本,机器配置统一读
                    C:\sinan\config\qmt.json:执行全部策略 targets + 备注
-                   「策略ID#日期#序号」归因 + 策略虚拟账本 + fills 回写 + RPC
-                   转发;账号/模拟实盘从 QMT 绑定关系直读)· qmt_sdk(本地 SDK,
-                   与内置 API 同名同形,任意 API 经通用转发覆盖)
+                   「策略ID#日期#序号」归因 + 持久化执行日志 + 真实 deals 回写
+                   + RPC v2 转发;账号从 QMT 绑定关系直读)· qmt_sdk(本地 SDK)
 app.py + ui/       Streamlit 操作面板(app.py 路由入口,ui/ 页面模块)
 docs/RESEARCH.md   研究档案:全部实验结论表与决策记录
 var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fills)· reports
@@ -105,6 +110,11 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 - **targets 契约**:`targets_{策略名}_{YYYYMMDD}.json`,多策略互不覆盖;
   checksum 只覆盖权重契约,`live_profile` 记录实盘配置 ID,解析后的 `qmt`
   保持薄壳兼容;`ref_orders` 参考委托区仅供影子/人工执行参考。
+- **执行事实分层**:`targets = 目标意图`、`orders = 提交/柜台状态`、
+  `fills = 实际 deals`。只有 fills 改变策略账本；零成交也写回对账文件，
+  部分成交按真实数量/价格幂等重演。`run_signal` 永不发布或下单，远端执行必须
+  单独运行 `scripts/publish_targets.py`。QMT 报单前先写 execution journal；
+  重启窗口无法证明是否已报单时标为 `uncertain`，绝不盲目重报。
 - **策略调用**:引擎与 run_signal 一律走 `call_strategy(cfg, ctx)`(调用约定的
   唯一实现);ctx 可见列由 `SignalContext` 统一裁到后复权 OHLCV,两侧恒等。
   dca 的计划起始日在回测中以回测窗口起点为准(配置 `start` 只锚定影子/实盘),
@@ -127,6 +137,9 @@ var/               本机状态,git 忽略:store(数据仓)· runtime(targets/fi
 - **数据源链**:设置页按优先级选择 `sina`、`akshare`、`tushare`、`qmt`;
   单源不可用时自动降级到下一项,空链、重复项和空名称在保存前直接拒绝。
   QMT RPC 连接参数在每份“实盘配置”中维护；QMT 数据源使用默认实盘配置。
+  “验证 RPC”只读检查协议 v2、行情、账号、委托/成交查询，不会调用发布/下单/
+  撤单。绑定仿真账号后仍须在 QMT 选择“实盘运行”；界面开关不可自动检测，
+  首次报单链路用独立 `qmt_trade_probe.py` 显式验证。
 
 ## 研究档案
 

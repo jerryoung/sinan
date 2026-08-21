@@ -5,19 +5,24 @@
 
 | 职责 | 节奏 | 说明 |
 |---|---|---|
-| 执行当日全部策略的 targets | 14:45 | 多策略共账号,下单备注「策略ID#日期#序号」归因 |
-| 按成交回报回写各策略 fills | 15:05 | 备注归因 deals → 策略虚拟账本 → fills_{策略}_{日期}.json |
-| 实盘状态推送 | 每 5 秒 | 新成交即时修正 fills，账户快照写 state/qmt_live.json |
-| API socket 转发(qmt_sdk 对端) | 常驻 | `rpc.enable=false` 可关 |
+| 执行当日全部策略的 targets | 14:45 | 先写执行日志，再以「策略ID#日期#序号」最多一次报单 |
+| 按真实成交回写各策略 fills | 15:05 | 备注归因 deals → baseline 幂等重演 → fills |
+| 实盘状态推送 | 每 5 秒 | 零/部分/全部成交都刷新执行状态与账户快照 |
+| RPC v2 转发 | 常驻 | targets 发布/状态查询在 socket 线程；QMT API 在策略线程泵执行 |
 
-模拟盘/实盘:在 QMT 把模型绑到模拟或实盘账号时决定,脚本只如实上报
-(fills 的 `trade_mode`);**资金账号/账号类型同样从绑定关系直读,
-不需要在脚本里填**。
+**绑定模拟账号不等于允许模型报单。**仿真验收时，模型必须绑定模拟账号并在
+QMT 界面选择“实盘运行”；“模拟运行”只产生模型信号，不会把 `passorder`
+送入绑定账号。QMT 未提供稳定字段让脚本读取这个界面开关，因此
+`trade_mode=unknown` 只能显示“不可自动检测”，最终以显式交易探针是否取得
+委托号为准。资金账号/账号类型仍从绑定关系直读，不需要重复配置。
+
+QMT 内置 Python 是 3.6.8。薄壳不使用 dataclass、现代类型注解或
+`datetime.fromisoformat`；升级脚本后应先完成本文的无副作用验证，再执行仿真探针。
 
 ## 一、QMT 侧部署(ECS)
 
 1. 大 QMT → 新建模型 → 整文件粘贴 `sinan_qmt.py`；
-2. 绑定模拟/实盘账号并运行——账号信息自动读取，多策略无须多个模型；
+2. 绑定目标账号；仿真账号也要把模型切到“实盘运行”才能验证真实报单链路；
 3. 首次运行会自动生成 `C:\sinan\config\qmt.json`，RPC 默认关闭；
 4. 编辑这一个配置文件，填好 Token、白名单并把 `rpc.enable` 改为 `true`；
 5. 停止并重新启动策略，配置即生效，无需重启整个 QMT 客户端。
@@ -63,8 +68,21 @@ socket 并释放 58620，因此之后可直接停止/启动模型，无需退出
 QMT 一次清理；此后使用新版脚本即可直接热重启模型。
 
 多策略共账号语义:每个策略一本虚拟账本(现金以 targets 的 capital 开账,
-状态在 SHARE_DIR/state/),差额各算各的、备注各打各的,同一标的甚至反向
-调仓也不串账;脚本会对"各策略目标权重合计 >100%"给出警告。
+状态在 `SHARE_DIR/state/`),差额各算各的、备注各打各的。每个执行日另有
+`SHARE_DIR/executions/execution_{策略}_{YYYYMMDD}.json`，在调用 `passorder`
+之前先落 `submitting`。重启遇到无法证明是否已经报出的窗口会标为
+`uncertain` 并停止自动重报，避免重复订单。
+
+执行事实严格分层：
+
+```text
+targets = 目标意图
+orders  = 提交过程与柜台委托状态
+fills   = QMT 返回的实际 deals（只有它会改变策略账本）
+```
+
+`passorder` 返回不再被当作成交。零成交同样写 fills，部分成交只按实际数量和
+价格更新账本；废单、撤单和未决状态保留在 `orders`，不会污染 `fills`。
 
 ## 二、远程访问安全模型(必读)
 
@@ -131,8 +149,12 @@ ssh -N qmt-ecs
 - 自动生成配置的 `rpc.allow_trade` 默认是 `true`，但 RPC 本身默认关闭；启用并
   部署到公网前必须确认 Token、
   应用白名单和云安全组均已收紧。需要只读调试时显式改为 `False`。
-- `rpc.health` 是无副作用健康协议，只返回服务版本、账号、运行模式和交易开关；
-  “设置 → 实盘配置 → 验证 RPC”还会查询 `510300.SH` 实时行情，但不会下单。
+- RPC v2 限制单请求为 1 MiB、队列为 64 项，并只开放司南使用的 QMT API；
+  后台 socket 线程不直接调用 QMT C++ API，而是交给 1 秒策略线程请求泵；
+- `rpc.health` 直接返回协议和能力，不进入 QMT API 队列；当前能力包括
+  `qmt_api_queue`、`publish_targets`、`execution_status`；
+- “设置 → 实盘配置 → 验证 RPC”会依次验证协议、`510300.SH` 行情、绑定账号、
+  委托和成交查询可序列化，**不会**调用发布、下单或撤单函数。
 
 ## 三、本地侧配置(司南)
 
@@ -146,7 +168,10 @@ python3 -c "import secrets; print(secrets.token_urlsafe(32))" > ~/.qmt_rpc_token
 
    ECS 侧 `C:\sinan\config\qmt.json` 的 `rpc.token` 填同一串。Token 只允许保存在
    服务器本地 JSON 和 Mac 的私有文件中，严禁写进脚本、仓库、共享目录或日志。
-3. 使用:
+3. 先在设置页点击“验证 RPC”。成功只说明网络、协议、行情、账号和交易查询可用，
+   `RPC 交易转发：允许`也只说明服务端没有拦截交易，不代表 QMT 模型界面已切到
+   “实盘运行”。
+4. 查询 API 可直接使用同名 SDK:
 
 ```python
 from qmt_shell import qmt_sdk as qmt
@@ -154,11 +179,64 @@ qmt.connect_from_settings()          # 读默认实盘配置 qmt.rpc + ~/.qmt_rp
 accs = qmt.get_trade_detail_data("8888888888", "STOCK", "account")
 ```
 
-## 四、安全清单(上实盘前逐项过)
+## 四、显式发布与拉取
+
+`run_signal.py` 只生成并保存本地 targets，永远不连接 QMT、不自动发布、不下单。
+远端执行必须是独立的显式动作：
+
+```bash
+# 先正常生成目标意图
+python3 scripts/run_signal.py --strategy config/strategies/combo_turtle_xsmom_x2.yaml \
+  --date 2026-08-21
+
+# 再把这一个文件发布到 payload.live_profile 指向的精确实盘配置
+python3 scripts/publish_targets.py \
+  var/runtime/targets/targets_combo_turtle_xsmom_x2_20260821.json
+
+# 成交/终态出现后，可重复发布（返回 duplicate）并原子拉回 fills
+python3 scripts/publish_targets.py --pull \
+  var/runtime/targets/targets_combo_turtle_xsmom_x2_20260821.json
+```
+
+服务端自己构造文件名并校验策略名、日期、checksum 和大小。相同 checksum 返回
+`duplicate`；执行开始前可替换目标，进入 `submitting` 后不同 checksum 会被拒绝。
+因此远程模式不依赖 Mac 与 Windows 之间另设目录同步，RPC 发布是 targets 的权威
+传输路径；本地原文件仍是可审计意图。
+
+仿真账号首次上线，用独立探针验证一次真实报单路径。它会提交一笔指定价委托，
+按短唯一备注查询，取得可撤委托号后立即请求撤单；超时或异常绝不重新报单：
+
+```bash
+python3 scripts/qmt_trade_probe.py \
+  --confirm-simulation-account 80391000 \
+  --symbol 510300.SH --qty 100 --limit-price <正数限价>
+```
+
+必须逐字确认当前仿真账号。限价应由操作者选择为不易成交但符合券商价格规则的
+有效价格；若已经成交，探针只报告 deal，不会反向下单。普通“验证 RPC”按钮与此
+探针严格分离。
+
+## 五、升级、回滚与故障判断
+
+升级：停止 QMT 模型，整份替换 `sinan_qmt.py`，重新启动模型；
+`C:\sinan\config\qmt.json` 不随脚本替换。看到 protocol v2 和三个能力后再继续。
+
+回滚：先停止模型并确认日志出现“监听端口已释放”，保存
+`SHARE_DIR/executions/` 与 `fills/`，再粘贴上一版脚本并启动。若任何日志停在
+`submitting`/`uncertain`，必须先在 QMT 委托/成交中按 remark 人工核对，不能删除
+日志后重报。旧版不认识 v2 journal 时只允许做只读回滚诊断，不应继续自动下单。
+
+公网明文 RPC 即使同时设置 Token、应用白名单和云安全组，也只适合临时只读诊断；
+任何 `allow_trade=true` 的远程交易必须迁移到 SSH 隧道或 Tailscale。
+
+## 六、安全清单(上实盘前逐项过)
 
 - [ ] RPC 转发未直接暴露公网(SSH 隧道或 Tailscale)
 - [ ] TOKEN ≥32 位随机,两端一致,`~/.qmt_rpc_token` 权限 600
 - [ ] 远端调试期 `rpc.allow_trade = false`,确认要下单才打开
 - [ ] ECS 安全组最小开放(方案 A 仅 22;方案 B 零公网端口)
 - [ ] fills/targets 同步盘目录不含任何凭证
-- [ ] 影子模式已并行跑 2~4 周,`trade_mode` 显示与预期一致
+- [ ] 设置页协议 v2、行情、账号、委托/成交查询全部通过
+- [ ] 绑定仿真账号的模型已切到“实盘运行”，交易探针取得唯一委托号并确认终态
+- [ ] 任一 `uncertain` 执行已经人工按 remark 核对，未通过删除日志盲目重报
+- [ ] 影子模式已并行跑 2~4 周；`trade_mode=unknown` 未被误解为已就绪

@@ -29,7 +29,8 @@ RPC 明文 TCP:传输安全靠 SSH 隧道/Tailscale;非 127.0.0.1 绑定强制
 rpc.allow_trade=false 时转发通道只读(targets 批处理执行不受影响)。
 
 本文件在本地不可执行(passorder 等由 QMT 注入),部署=整文件粘贴;
-校验和算法与 sinan/live/targets.py 逐字节一致(文件桥接解耦的全部代价)。
+targets 可由共享目录或 RPC v2 显式发布进入同一目录；校验和算法与
+sinan/live/targets.py 逐字节一致。
 """
 import hashlib
 import hmac
@@ -91,8 +92,6 @@ _PUBLISH_LOCK = threading.Lock()
 _EXECUTION_LOCK = threading.RLock()
 _C = None
 _ACCOUNT = {"id": "", "type": "STOCK"}
-_MORNING_LEDGERS = {}        # 用当日成交重算账本的起点
-_SEEN_DEAL_COUNTS = {}
 _LIVE_LAST = {"payload": None}
 _RPC_SERVER = None           # stop(ContextInfo) 负责关闭,释放模型后台监听
 
