@@ -53,8 +53,11 @@ def test_live_profile_page_can_verify_qmt_rpc_readiness():
     source = LIVE_PAGE.read_text(encoding="utf-8")
     assert "verify_qmt_rpc" in source
     assert '"验证 RPC"' in source
-    for field in ("运行模式", "交易权限", "实时行情"):
+    for field in ("RPC 交易转发", "QMT 模式不可自动检测",
+                  "委托/成交查询", "协议", "能力", "实时行情"):
         assert field in source
+    assert "passorder" not in source
+    assert "cancel(" not in source
 
 
 def test_settings_form_exposes_multi_source_priority():

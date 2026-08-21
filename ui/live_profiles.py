@@ -140,7 +140,7 @@ def render_live_profiles_page() -> None:
         "验证 RPC",
         key=f"live_profile_{fkey}_{selected}_rpc_verify",
         disabled=is_new,
-        help="验证当前表单地址、Token、QMT 服务与实时行情，不会产生委托",
+        help="验证地址、Token、协议、行情、账号及委托/成交查询，不会产生委托",
     ):
         with st.spinner("正在验证 QMT RPC…"):
             result = verify_qmt_rpc(
@@ -150,18 +150,30 @@ def render_live_profiles_page() -> None:
             health = result.health
             quote = result.quote
             st.success(f"{result.message} · {result.endpoint}")
-            v1, v2, v3, v4 = st.columns(4)
-            v1.metric("运行模式", health.get("trade_mode") or "unknown")
-            v2.metric("交易权限", "已开启" if health.get("allow_trade") else "只读")
-            v3.metric("绑定账号", health.get("account") or "未识别")
+            query = result.trade_query
+            trade_mode = health.get("trade_mode") or "unknown"
+            v1, v2, v3, v4, v5 = st.columns(5)
+            v1.metric("QMT 模式", "不可自动检测" if trade_mode == "unknown"
+                      else trade_mode)
+            v2.metric("RPC 交易转发", "允许" if health.get("allow_trade") else "只读")
+            v3.metric("绑定账号", result.account.get("id") or "未识别",
+                      help=f"账号状态：{result.account.get('status', '未提供')}")
+            v4.metric("委托/成交查询", f"{query.get('orders', 0)} / "
+                      f"{query.get('deals', 0)}")
             price = quote.get("last_price")
-            v4.metric("实时行情", "—" if price is None else str(price),
+            v5.metric("实时行情", "—" if price is None else str(price),
                       help=f"{quote.get('symbol')} {quote.get('name')}")
+            capabilities = "、".join(health.get("capabilities") or []) or "未提供"
             st.caption(f"服务 {health.get('service')} / 协议 v{health.get('protocol')}；"
-                       "验证过程未调用任何交易函数。")
+                       f"能力：{capabilities}；验证过程未调用任何交易函数。")
+            if trade_mode == "unknown":
+                st.warning("QMT 模式不可自动检测：RPC 就绪不等于模型已进入实盘运行；"
+                           "报单链路请使用独立的仿真交易探针显式验证。")
         else:
             stage_label = {"tcp": "网络", "health": "鉴权/协议",
-                           "quote": "行情"}.get(result.stage, result.stage)
+                           "quote": "行情", "account": "账号",
+                           "trade_query": "委托/成交查询"}.get(
+                               result.stage, result.stage)
             st.error(f"RPC 未准备就绪 · {result.endpoint} · "
                      f"失败阶段：{stage_label} · {result.message}")
 
