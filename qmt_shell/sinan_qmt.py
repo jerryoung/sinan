@@ -81,7 +81,7 @@ _RPC_CONTEXT_FNS = {
     "get_instrument_detail",
 }
 _RPC_PROTOCOL = 2
-_RPC_CAPABILITIES = ["qmt_api_queue", "publish_targets"]
+_RPC_CAPABILITIES = ["qmt_api_queue", "publish_targets", "execution_status"]
 _RPC_REQUEST_MAX_BYTES = 1024 * 1024
 _RPC_QUEUE_SIZE = 64
 _RPC_PUMP_LIMIT = 8
@@ -462,9 +462,7 @@ def load_ledger(strategy, capital):
 
 def save_ledger(strategy, led):
     path = _ledger_path(strategy)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(led, f, ensure_ascii=False, indent=2)
+    _atomic_write_json(path, led)
 
 
 def plan_orders(weights, ledger, prices, lot=LOT):
@@ -677,63 +675,300 @@ def do_rebalance(C):
                   % (strategy, type(e).__name__, e))
 
 
-def _collect_deals(ymd):
-    """收集当日成交并按司南备注归因。"""
-    deals_by_strategy = {}
-    for d in get_trade_detail_data(_ACCOUNT["id"], _ACCOUNT["type"], "deal") or []:
-        remark = getattr(d, "m_strRemark", "") or getattr(d, "m_strUserOrderId", "")
-        strategy, ext = parse_remark(remark)
-        if strategy is None or (ext and ext[0] != ymd):
+def _read_qmt_attr(obj, names, default=None, required=False):
+    """读取 QMT C++ 对象字段；必需字段不可转出时明确失败。"""
+    errors = []
+    for name in names:
+        try:
+            value = getattr(obj, name)
+        except Exception as e:                # C++ shared_ptr 转换可能在 getattr 抛错
+            errors.append("%s:%s" % (name, type(e).__name__))
             continue
-        deals_by_strategy.setdefault(strategy, []).append({
-            "symbol": str(getattr(d, "m_strInstrumentID", "")),
-            "side": "buy" if int(getattr(d, "m_nOffsetFlag", 48)) in (48, 0) else "sell",
-            "qty": int(getattr(d, "m_nVolume", 0)),
-            "price": float(getattr(d, "m_dPrice", 0.0)),
-            "remark": str(remark)})
-    return deals_by_strategy
+        if value is not None and value != "":
+            return value
+    if required:
+        detail = ",".join(errors) if errors else "字段缺失"
+        raise ValueError("QMT 必需字段 %s 不可读(%s)" % (names[0], detail))
+    return default
 
 
-def _reconcile_strategy(C, now, strategy, deals, tag):
-    """从调仓前账本按实际成交价幂等重演并回写 fills。"""
-    led = _MORNING_LEDGERS.get(strategy)
-    if led is None:
-        print("[sinan] %s 无早间账本留底,fills 仅更新成交列表" % strategy)
-        led = load_ledger(strategy, 0.0)
-    else:
-        led = json.loads(json.dumps(led))
-        for t in deals:
-            sign = 1 if t["side"] == "buy" else -1
-            led["pos"][t["symbol"]] = (int(led["pos"].get(t["symbol"], 0))
-                                       + sign * t["qty"])
-            led["cash"] -= sign * t["qty"] * t["price"]
-            if led["pos"].get(t["symbol"]) == 0:
-                led["pos"].pop(t["symbol"])
-        save_ledger(strategy, led)
+def _remark_identity(obj):
+    remark = _read_qmt_attr(
+        obj, ("m_strRemark", "m_strUserOrderId", "m_strUserOrderID"), "")
+    return str(remark or "")
+
+
+def _normalize_symbol(value):
+    return str(value or "").split(".", 1)[0]
+
+
+def _collect_orders(ymd):
+    """查询当日司南委托并按策略归因；匹配记录缺必需字段时拒绝伪成功。"""
+    by_strategy = {}
+    rows = get_trade_detail_data(
+        _ACCOUNT["id"], _ACCOUNT["type"], "order") or []
+    for obj in rows:
+        remark = _remark_identity(obj)
+        strategy, ext = parse_remark(remark)
+        if strategy is None or not ext or ext[0] != ymd:
+            continue
+        try:
+            symbol = _normalize_symbol(_read_qmt_attr(
+                obj, ("m_strInstrumentID",), required=True))
+            value = {
+                "remark": remark,
+                "symbol": symbol,
+                "order_sys_id": str(_read_qmt_attr(
+                    obj, ("m_strOrderSysID", "m_strOrderID"), "")),
+                "status_raw": int(_read_qmt_attr(
+                    obj, ("m_nOrderStatus",), required=True)),
+                "qty": int(_read_qmt_attr(
+                    obj, ("m_nVolumeTotalOriginal", "m_nOrderVolume",
+                          "m_nVolume"), required=True)),
+                "traded_qty": int(_read_qmt_attr(
+                    obj, ("m_nVolumeTraded", "m_nTradedVolume",
+                          "m_nDealVolume"), 0)),
+                "cancel_qty": int(_read_qmt_attr(
+                    obj, ("m_dCancelAmount", "m_nCancelVolume",
+                          "m_nCanceledVolume"), 0)),
+                "price": float(_read_qmt_attr(
+                    obj, ("m_dLimitPrice", "m_dOrderPrice", "m_dPrice"),
+                    0.0)),
+            }
+        except Exception as e:                 # 只污染所属策略，不毁掉整批查询
+            value = {"remark": remark,
+                     "_error": "%s: %s" % (type(e).__name__, e)}
+        by_strategy.setdefault(strategy, []).append(value)
+    return by_strategy
+
+
+def _collect_deals(ymd):
+    """查询当日司南真实成交并按策略归因。"""
+    by_strategy = {}
+    rows = get_trade_detail_data(
+        _ACCOUNT["id"], _ACCOUNT["type"], "deal") or []
+    for obj in rows:
+        remark = _remark_identity(obj)
+        strategy, ext = parse_remark(remark)
+        if strategy is None or not ext or ext[0] != ymd:
+            continue
+        try:
+            raw_time = _read_qmt_attr(
+                obj, ("m_strTradeTime", "m_nTradeTime", "m_nTime"), "")
+            convert = globals().get("timetag_to_datetime")
+            try:
+                trade_time = (convert(raw_time, "%Y-%m-%d %H:%M:%S")
+                              if convert and raw_time != "" and
+                              not isinstance(raw_time, str)
+                              else str(raw_time or ""))
+            except Exception:
+                trade_time = str(raw_time or "")
+            side_raw = int(_read_qmt_attr(
+                obj, ("m_nOffsetFlag", "m_nDirection"), required=True))
+            value = {
+                "trade_id": str(_read_qmt_attr(
+                    obj, ("m_strTradeID", "m_strDealID"), "")),
+                "order_sys_id": str(_read_qmt_attr(
+                    obj, ("m_strOrderSysID", "m_strOrderID"), "")),
+                "remark": remark,
+                "symbol": _normalize_symbol(_read_qmt_attr(
+                    obj, ("m_strInstrumentID",), required=True)),
+                "side": "buy" if side_raw in (48, 0, 23) else "sell",
+                "qty": int(_read_qmt_attr(
+                    obj, ("m_nVolume", "m_nTradeVolume"), required=True)),
+                "price": float(_read_qmt_attr(
+                    obj, ("m_dPrice", "m_dTradePrice"), required=True)),
+                "trade_time": str(trade_time),
+            }
+        except Exception as e:
+            value = {"remark": remark,
+                     "_error": "%s: %s" % (type(e).__name__, e)}
+        by_strategy.setdefault(strategy, []).append(value)
+    return by_strategy
+
+
+def _deal_key(deal):
+    if deal.get("trade_id"):
+        return "id:%s" % deal["trade_id"]
+    fields = ("order_sys_id", "remark", "symbol", "side", "qty", "price",
+              "trade_time")
+    return "fallback:" + json.dumps(
+        [deal.get(k) for k in fields], ensure_ascii=False, separators=(",", ":"))
+
+
+def _rebuild_ledger(baseline, deals):
+    """每次从磁盘 baseline 重演去重后的真实成交，天然支持重复轮询/重启。"""
+    ledger = json.loads(json.dumps(baseline))
+    ledger["cash"] = float(ledger.get("cash", 0.0))
+    ledger["pos"] = {str(k): int(v) for k, v in (ledger.get("pos") or {}).items()}
+    unique, seen = [], set()
+    for raw in deals or []:
+        deal = dict(raw)
+        key = _deal_key(deal)
+        if key in seen:
+            continue
+        seen.add(key)
+        symbol = _normalize_symbol(deal.get("symbol"))
+        side = deal.get("side")
+        qty, price = int(deal.get("qty", 0)), float(deal.get("price", 0.0))
+        if not symbol or side not in ("buy", "sell") or qty <= 0 or price <= 0:
+            raise ValueError("成交记录关键字段无效:%r" % deal)
+        deal["symbol"] = symbol
+        sign = 1 if side == "buy" else -1
+        ledger["pos"][symbol] = int(ledger["pos"].get(symbol, 0)) + sign * qty
+        ledger["cash"] -= sign * qty * price
+        if ledger["pos"][symbol] == 0:
+            ledger["pos"].pop(symbol)
+        unique.append(deal)
+    return ledger, unique
+
+
+def _order_state(raw_status):
+    raw = int(raw_status)
+    if raw == 56:
+        return "filled"
+    if raw in (53, 54):
+        return "canceled"
+    if raw == 57:
+        return "rejected"
+    if raw in (52, 55):
+        return "partially_filled"
+    return "accepted"
+
+
+def _execution_state(order_states):
+    if not order_states:
+        return "filled"
+    if any(s == "unreadable" for s in order_states):
+        return "unreadable"
+    if any(s == "uncertain" for s in order_states):
+        return "uncertain"
+    if all(s == "filled" for s in order_states):
+        return "filled"
+    if any(s == "partially_filled" for s in order_states):
+        return "partially_filled"
+    if any(s == "filled" for s in order_states):
+        return "partially_filled"
+    if any(s == "rejected" for s in order_states):
+        return "rejected"
+    if any(s == "canceled" for s in order_states):
+        return "canceled"
+    if any(s == "accepted" for s in order_states):
+        return "accepted"
+    return "submitted"
+
+
+def _reconcile_execution(execution, qmt_orders, qmt_deals):
+    """纯计算：把委托状态与真实成交折叠进执行日志和策略账本。"""
+    value = json.loads(json.dumps(execution))
+    remarks = {o.get("remark") for o in value.get("orders") or []}
+    orders_by_remark = {o.get("remark"): o for o in (qmt_orders or [])
+                        if o.get("remark") in remarks}
+    relevant_deals = [d for d in (qmt_deals or []) if d.get("remark") in remarks]
+    broken_deals = {d.get("remark"): d.get("_error") for d in relevant_deals
+                    if d.get("_error")}
+    relevant_deals = [d for d in relevant_deals if not d.get("_error")]
+    ledger, unique = _rebuild_ledger(value.get("baseline") or {}, relevant_deals)
+    deals_by_remark = {}
+    for deal in unique:
+        deals_by_remark.setdefault(deal.get("remark"), []).append(deal)
+
+    for planned in value.get("orders") or []:
+        remark = planned.get("remark")
+        observed = orders_by_remark.get(remark)
+        order_deals = deals_by_remark.get(remark, [])
+        traded_qty = sum(int(d.get("qty", 0)) for d in order_deals)
+        if observed and observed.get("_error"):
+            planned["status"] = "unreadable"
+            planned["error"] = observed["_error"]
+        elif observed:
+            for key in ("order_sys_id", "status_raw", "traded_qty",
+                        "cancel_qty", "price"):
+                planned[key] = observed.get(key)
+            planned["status"] = _order_state(observed.get("status_raw"))
+        if traded_qty >= int(planned.get("qty", 0)) and traded_qty > 0:
+            planned["status"] = "filled"
+        elif traded_qty > 0:
+                planned["status"] = "partially_filled"
+        if remark in broken_deals:
+            planned["status"] = "unreadable"
+            planned["error"] = broken_deals[remark]
+        planned["traded_qty"] = traded_qty
+    value["deals"] = unique
+    value["status"] = _execution_state(
+        [o.get("status", "submitted") for o in value.get("orders") or []])
+    value["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    return {"execution": value, "ledger": ledger, "fills": unique}
+
+
+def _refresh_execution(C, execution, qmt_orders, qmt_deals, prices=None, now=None):
+    """持久化一次幂等对账：日志、账本和 fills 共同来自同一计算结果。"""
+    result = _reconcile_execution(execution, qmt_orders, qmt_deals)
+    value, ledger, fills = (result["execution"], result["ledger"], result["fills"])
+    save_execution(value)
+    save_ledger(value["strategy"], ledger)
+    market_prices = dict(value.get("prices") or {})
+    market_prices.update(prices or {})
+    for deal in fills:
+        market_prices[deal["symbol"]] = deal["price"]
+    _write_fills(C, now or datetime.now(), value["strategy"], ledger,
+                 market_prices, fills, execution_status=value["status"],
+                 order_states=value.get("orders") or [], day=value["date"])
+    return value
+
+
+def _load_day_executions(day):
+    directory = os.path.join(SHARE_DIR, "executions")
+    suffix = "_%s.json" % day.replace("-", "")
+    out = []
+    if not os.path.isdir(directory):
+        return out
+    for name in sorted(os.listdir(directory)):
+        if not name.startswith("execution_") or not name.endswith(suffix):
+            continue
+        with open(os.path.join(directory, name), encoding="utf-8") as f:
+            value = json.load(f)
+        _safe_strategy(value.get("strategy"))
+        if value.get("date") != day:
+            raise ValueError("执行日志日期不符:%s" % name)
+        out.append(value)
+    return out
+
+
+def _refresh_day(C, now, tag):
+    day, ymd = now.strftime("%Y-%m-%d"), now.strftime("%Y%m%d")
+    executions = _load_day_executions(day)
+    if not executions:
+        return {}, {}
+    orders_by_strategy = _collect_orders(ymd)
+    deals_by_strategy = _collect_deals(ymd)
     acct_pos, _, _ = _snapshot()
-    prices = {s: acct_pos.get(s, [0, 0, 0.0])[2] for s in led["pos"]}
-    _write_fills(C, now, strategy, led, prices, deals)
-    print("[sinan] %s: fills 已按 %d 笔实际成交重算(%s)"
-          % (strategy, len(deals), tag))
+    prices = {s: values[2] for s, values in acct_pos.items()}
+    for execution in executions:
+        strategy = execution["strategy"]
+        try:
+            refreshed = _refresh_execution(
+                C, execution, orders_by_strategy.get(strategy, []),
+                deals_by_strategy.get(strategy, []), prices=prices, now=now)
+            print("[sinan] %s: %d 笔真实成交，执行状态 %s(%s)"
+                  % (strategy, len(refreshed.get("deals") or []),
+                     refreshed.get("status"), tag))
+        except Exception as e:                 # 单策略坏数据不得瘫痪其他策略
+            print("[sinan] %s 对账失败:%s: %s"
+                  % (strategy, type(e).__name__, e))
+    return orders_by_strategy, deals_by_strategy
 
 
 def do_snapshot(C):
-    """15:05 收盘兜底,按当日实际成交修正 fills。"""
-    now = datetime.now()
-    for strategy, deals in _collect_deals(now.strftime("%Y%m%d")).items():
-        _reconcile_strategy(C, now, strategy, deals, "收盘对账")
-        _SEEN_DEAL_COUNTS[strategy] = len(deals)
+    """15:05 收盘兜底；包括零成交执行，保证次日有 fills 可对账。"""
+    _refresh_day(C, datetime.now(), "收盘对账")
 
 
 def do_live_push(C):
-    """每 5 秒推送账户快照;发现新成交时即时修正 fills。"""
+    """每周期刷新所有当日执行并推送账户快照。"""
     try:
         now = datetime.now()
-        deals_by_strategy = _collect_deals(now.strftime("%Y%m%d"))
-        for strategy, deals in deals_by_strategy.items():
-            if len(deals) > _SEEN_DEAL_COUNTS.get(strategy, 0):
-                _reconcile_strategy(C, now, strategy, deals, "盘中即时")
-                _SEEN_DEAL_COUNTS[strategy] = len(deals)
+        _, deals_by_strategy = _refresh_day(C, now, "盘中即时")
         _write_live_state(C, now, deals_by_strategy)
     except Exception as e:                   # QMT 回调不可向外抛异常
         print("[live] 推送失败(下周期重试): %s: %s" % (type(e).__name__, e))
@@ -773,11 +1008,13 @@ def _write_live_state(C, now, deals_by_strategy):
     os.replace(tmp, path)
 
 
-def _write_fills(C, now, strategy, led, prices, orders):
+def _write_fills(C, now, strategy, led, prices, fills,
+                 execution_status=None, order_states=None, day=None):
     """按策略回写 fills(策略口径:账本现金/持仓;账户口径字段并列供对账)。"""
     pos_val = {s: q * prices.get(s, 0.0) for s, q in led["pos"].items()}
     total_s = led["cash"] + sum(pos_val.values())
-    out = {"date": now.strftime("%Y-%m-%d"),
+    day = day or now.strftime("%Y-%m-%d")
+    out = {"date": day,
            "written_at": datetime.now().isoformat(timespec="seconds"),
            "strategy": strategy,
            "account": _ACCOUNT["id"],
@@ -785,16 +1022,18 @@ def _write_fills(C, now, strategy, led, prices, orders):
            "total_asset": total_s, "cash": led["cash"],
            "weights": {s: round(v / total_s, 6)
                        for s, v in pos_val.items() if total_s > 0},
-           "fills": orders,
+           "fills": fills,
            "positions": {s: {"qty": q, "avail_qty": q,
                              "price": prices.get(s, 0.0)}
                          for s, q in led["pos"].items()}}
+    if execution_status is not None:
+        out["execution_status"] = execution_status
+    if order_states is not None:
+        out["orders"] = order_states
     fdir = os.path.join(SHARE_DIR, "fills")
-    os.makedirs(fdir, exist_ok=True)
     path = os.path.join(fdir, "fills_%s_%s.json" % (strategy,
-                                                    now.strftime("%Y%m%d")))
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
+                                                    day.replace("-", "")))
+    _atomic_write_json(path, out)
 
 
 # ══════════════════════ RPC 转发(与 qmt_sdk 配套)══════════════════════
@@ -906,6 +1145,27 @@ def do_rpc_pump(C):
             _RPC_API_QUEUE.task_done()
 
 
+def _execution_status_payload(strategy, day):
+    """只按校验后的精确身份读取日志/fills，不接受任意服务端路径。"""
+    strategy = _safe_strategy(strategy)
+    if not isinstance(day, str) or not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        raise ValueError("执行日期必须为 YYYY-MM-DD")
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError("执行日期无效: %s" % day)
+    journal = load_execution(strategy, day)
+    fills_path = os.path.join(
+        SHARE_DIR, "fills",
+        "fills_%s_%s.json" % (strategy, day.replace("-", "")))
+    fills = None
+    if os.path.exists(fills_path):
+        with open(fills_path, encoding="utf-8") as f:
+            fills = json.load(f)
+    return {"found": journal is not None or fills is not None,
+            "journal": journal, "fills": fills}
+
+
 def dispatch(namespace, C, fn, args, kwargs, allow_trade=True):
     if fn == "rpc.health":
         return {"service": "sinan-qmt-rpc", "protocol": _RPC_PROTOCOL,
@@ -920,6 +1180,10 @@ def dispatch(namespace, C, fn, args, kwargs, allow_trade=True):
         if kwargs or not isinstance(args, list) or len(args) != 1:
             raise ValueError("rpc.publish_targets 只接受一个 payload 参数")
         return _publish_targets(args[0])
+    if fn == "rpc.execution_status":
+        if kwargs or not isinstance(args, list) or len(args) != 2:
+            raise ValueError("rpc.execution_status 只接受 strategy, date")
+        return _execution_status_payload(args[0], args[1])
     _validate_rpc_method(fn)
     return _submit_api_request(namespace, C, fn, args, kwargs,
                                allow_trade=allow_trade)
