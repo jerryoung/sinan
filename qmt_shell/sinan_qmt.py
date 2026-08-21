@@ -88,6 +88,7 @@ _RPC_PUMP_LIMIT = 8
 _RPC_CALL_TIMEOUT = 20.0
 _RPC_API_QUEUE = queue.Queue(maxsize=_RPC_QUEUE_SIZE)
 _PUBLISH_LOCK = threading.Lock()
+_EXECUTION_LOCK = threading.RLock()
 _C = None
 _ACCOUNT = {"id": "", "type": "STOCK"}
 _MORNING_LEDGERS = {}        # 用当日成交重算账本的起点
@@ -388,8 +389,16 @@ def _publish_targets(payload, now=None):
             if old.get("checksum") == checksum:
                 status = "duplicate"
             else:
-                status = "replaced"
-                _atomic_write_json(path, clean)
+                with _EXECUTION_LOCK:
+                    execution = load_execution(strategy, day)
+                    if execution and execution.get("status") not in (
+                            "received", "planned"):
+                        raise ValueError(
+                            "执行已开始，拒绝替换不同 checksum 的 targets")
+                    if execution:
+                        os.remove(_execution_path(strategy, day))
+                    status = "replaced"
+                    _atomic_write_json(path, clean)
         else:
             _atomic_write_json(path, clean)
     return {"status": status, "strategy": strategy, "date": day,
@@ -483,10 +492,160 @@ def _qmt_code(sym):
     return sym + (".SH" if sym.startswith(("5", "6")) else ".SZ")
 
 
+def _execution_path(strategy, day):
+    strategy = _safe_strategy(strategy)
+    if not isinstance(day, str) or not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        raise ValueError("执行日期必须为 YYYY-MM-DD")
+    try:
+        parsed = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError("执行日期无效: %s" % day)
+    return os.path.join(
+        SHARE_DIR, "executions",
+        "execution_%s_%s.json" % (strategy, parsed.strftime("%Y%m%d")))
+
+
+def load_execution(strategy, day):
+    """读取指定策略/日期执行日志；不存在返回 None。"""
+    path = _execution_path(strategy, day)
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        value = json.load(f)
+    if value.get("strategy") != strategy or value.get("date") != day:
+        raise ValueError("执行日志身份字段不符")
+    return value
+
+
+def save_execution(execution):
+    """原子保存执行状态；每个 passorder 副作用前后都必须调用。"""
+    execution["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    path = _execution_path(execution.get("strategy"), execution.get("date"))
+    with _EXECUTION_LOCK:
+        _atomic_write_json(path, execution)
+    return path
+
+
+def prepare_execution(payload, prices, now=None):
+    """以持久化 baseline 生成确定性委托计划；同 checksum 只恢复不重算。"""
+    clean = _validate_target_payload(payload)
+    strategy, day = clean["strategy"], clean["date"]
+    with _EXECUTION_LOCK:
+        existing = load_execution(strategy, day)
+        if existing is not None:
+            if existing.get("checksum") != clean["checksum"]:
+                raise ValueError("执行日志与 targets checksum 冲突")
+            return existing
+
+        timestamp = (now or datetime.now()).isoformat(timespec="seconds")
+        baseline = json.loads(json.dumps(
+            load_ledger(strategy, clean.get("capital", 0.0))))
+        algo = dict(ALGO_DEFAULT)
+        algo.update((clean.get("qmt") or {}).get("algo") or {})
+        quote_mode = str(algo.get("quote_mode", "latest"))
+        pr_type = _PR_TYPE.get(quote_mode, 5)
+        offset = float(algo.get("price_offset", 0.0))
+        max_qty = int(algo.get("max_order_qty", ALGO_DEFAULT["max_order_qty"]))
+        if max_qty <= 0:
+            raise ValueError("qmt.algo.max_order_qty 必须大于 0")
+
+        orders = []
+        seq = 0
+        for sym, side, qty, px in plan_orders(
+                clean.get("targets") or {}, baseline, prices):
+            remaining = qty
+            while remaining > 0:
+                lot_qty = min(remaining, max_qty)
+                seq += 1
+                order_px = (px * (1 + offset) if side == "buy"
+                            else px * (1 - offset))
+                orders.append({
+                    "sequence": seq,
+                    "remark": make_remark(strategy, day.replace("-", ""), seq),
+                    "symbol": sym,
+                    "qmt_code": _qmt_code(sym),
+                    "side": side,
+                    "qty": lot_qty,
+                    "reference_price": px,
+                    "op": 23 if side == "buy" else 24,
+                    "price_type": pr_type,
+                    "order_price": round(order_px, 3) if pr_type == 11 else -1,
+                    "status": "planned",
+                })
+                remaining -= lot_qty
+        execution = {
+            "strategy": strategy,
+            "date": day,
+            "checksum": clean["checksum"],
+            "targets": clean.get("targets") or {},
+            "status": "planned",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "baseline": baseline,
+            "prices": {str(k): float(v) for k, v in prices.items()},
+            "orders": orders,
+        }
+        save_execution(execution)
+        return execution
+
+
+def submit_execution(C, execution):
+    """按日志逐笔最多提交一次；不确定窗口绝不自动重报。"""
+    for order in execution.get("orders") or []:
+        with _EXECUTION_LOCK:
+            status = order.get("status", "planned")
+            if status == "submitting":
+                order["status"] = "uncertain"
+                order["error"] = "模型重启时委托处于 submitting，无法证明是否已报单"
+                execution["status"] = "uncertain"
+                save_execution(execution)
+                return execution
+            if status == "uncertain":
+                execution["status"] = "uncertain"
+                return execution
+            if status != "planned":
+                continue
+
+            order["status"] = "submitting"
+            order["submitting_at"] = datetime.now().isoformat(timespec="seconds")
+            execution["status"] = "submitting"
+            save_execution(execution)
+        try:
+            result = passorder(
+                order["op"], 1101, _ACCOUNT["id"], order["qmt_code"],
+                order["price_type"], order["order_price"], order["qty"],
+                "sinan", 2, order["remark"], C)
+        except Exception as e:                 # noqa: BLE001
+            with _EXECUTION_LOCK:
+                order["status"] = "uncertain"
+                order["error"] = "%s: %s" % (type(e).__name__, e)
+                execution["status"] = "uncertain"
+                save_execution(execution)
+            print("[sinan] %s 委托状态不确定:%s"
+                  % (order["remark"], order["error"]))
+            return execution
+        with _EXECUTION_LOCK:
+            order["status"] = "submitted"
+            order["submitted_at"] = datetime.now().isoformat(timespec="seconds")
+            if result is not None:
+                order["submit_result"] = to_jsonable(result)
+            execution["status"] = "submitted"
+            save_execution(execution)
+
+    if not execution.get("orders"):
+        execution["status"] = "submitted"
+        save_execution(execution)
+    elif all(o.get("status") != "planned" for o in execution["orders"]):
+        execution["status"] = ("uncertain" if any(
+            o.get("status") == "uncertain" for o in execution["orders"])
+            else "submitted")
+        save_execution(execution)
+    return execution
+
+
 # ══════════════════════ 调仓与回写 ══════════════════════
 def do_rebalance(C):
     now = datetime.now()
-    ymd = now.strftime("%Y%m%d")
     payloads = _load_today_targets(now)
     if not payloads:
         return
@@ -496,50 +655,26 @@ def do_rebalance(C):
         print("[sinan] 警告: 各策略目标权重合计 %.1f%% > 100%%,"
               "请检查各策略 capital/权重配置" % (total_w * 100))
 
-    _MORNING_LEDGERS.clear()
     for p in payloads:
         strategy = p["strategy"]
-        algo = dict(ALGO_DEFAULT)
-        algo.update((p.get("qmt") or {}).get("algo") or {})
-        pr_type = _PR_TYPE.get(str(algo["quote_mode"]), 5)
-        offset = float(algo["price_offset"])
-        max_qty = int(algo["max_order_qty"])
-
-        led = load_ledger(strategy, p.get("capital", 0.0))
-        _MORNING_LEDGERS[strategy] = json.loads(json.dumps(led))   # 深拷贝留底
-        prices = {}
-        for sym in set(p.get("targets") or {}) | set(led["pos"]):
-            held = acct_pos.get(sym)
-            px = held[2] if held else 0.0
-            if px <= 0:
-                tick = C.get_full_tick([_qmt_code(sym)])
-                px = tick.get(_qmt_code(sym), {}).get("lastPrice", 0.0)
-            prices[sym] = px
-
-        placed = []
-        seq = 0
-        for sym, side, qty, px in plan_orders(p.get("targets") or {}, led, prices):
-            remaining = qty
-            while remaining > 0:
-                lot_qty = min(remaining, max_qty)
-                seq += 1
-                remark = make_remark(strategy, ymd, seq)
-                op = 23 if side == "buy" else 24
-                order_px = px * (1 + offset) if side == "buy" else px * (1 - offset)
-                passorder(op, 1101, _ACCOUNT["id"], _qmt_code(sym), pr_type,
-                          round(order_px, 3) if pr_type == 11 else -1, lot_qty,
-                          "sinan", 2, remark, C)
-                placed.append({"symbol": sym, "side": side, "qty": lot_qty,
-                               "price": px, "remark": remark})
-                remaining -= lot_qty
-            sign = 1 if side == "buy" else -1
-            led["pos"][sym] = int(led["pos"].get(sym, 0)) + sign * qty
-            led["cash"] -= sign * qty * px
-            if led["pos"][sym] == 0:
-                led["pos"].pop(sym)
-        save_ledger(strategy, led)
-        _write_fills(C, now, strategy, led, prices, placed)
-        print("[sinan] %s: %d 笔委托" % (strategy, len(placed)))
+        try:
+            led = load_ledger(strategy, p.get("capital", 0.0))
+            prices = {}
+            for sym in set(p.get("targets") or {}) | set(led["pos"]):
+                held = acct_pos.get(sym)
+                px = held[2] if held else 0.0
+                if px <= 0:
+                    tick = C.get_full_tick([_qmt_code(sym)])
+                    px = tick.get(_qmt_code(sym), {}).get("lastPrice", 0.0)
+                prices[sym] = px
+            execution = prepare_execution(p, prices, now=now)
+            execution = submit_execution(C, execution)
+            print("[sinan] %s: %d 笔委托，执行状态 %s"
+                  % (strategy, len(execution.get("orders") or []),
+                     execution.get("status")))
+        except Exception as e:                 # 单策略失败不阻断其余策略
+            print("[sinan] %s 调仓失败:%s: %s"
+                  % (strategy, type(e).__name__, e))
 
 
 def _collect_deals(ymd):
