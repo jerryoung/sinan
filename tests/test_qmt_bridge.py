@@ -5,6 +5,7 @@ ContextInfo 在本地起真实 socket 服务,SDK 走完整协议往返。
 """
 import json
 import socket
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -12,6 +13,83 @@ import pytest
 from qmt_shell import qmt_sdk, sinan_qmt as rpc_server
 from sinan.config import (LiveProfileCfg, LiveProfilesCfg, QmtExecutionCfg,
                           QmtRpcCfg)
+
+
+class _BadOrderTag:
+    """QMT 实盘委托对象中的 m_xtTag 是不可转出的 C++ shared_ptr。"""
+
+    m_strRemark = "probe#20260821#1"
+    m_strOrderSysID = "12345"
+
+    @property
+    def m_xtTag(self):
+        raise TypeError("No to_python converter for CXtOrderTag")
+
+
+def test_to_jsonable_skips_unconvertible_qmt_attribute():
+    out = rpc_server.to_jsonable(_BadOrderTag())
+
+    assert out["m_strRemark"] == "probe#20260821#1"
+    assert out["m_strOrderSysID"] == "12345"
+    assert "m_xtTag" not in out
+
+
+def test_qmt_iso_parser_is_python36_compatible():
+    value = rpc_server._parse_iso_datetime("2026-08-21T14:35:01")
+
+    assert value.strftime("%Y-%m-%d %H:%M:%S") == "2026-08-21 14:35:01"
+    source = Path(rpc_server.__file__).read_text(encoding="utf-8")
+    assert "datetime.fromisoformat" not in source
+
+
+class _PeerAbortConnection:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def recv(self, _size):
+        raise ConnectionAbortedError(10053, "连接已由主机软件中止")
+
+    def close(self):
+        pass
+
+
+def test_rpc_handler_treats_peer_abort_as_normal_disconnect(capsys):
+    rpc_server._handle(
+        _PeerAbortConnection(), ("127.0.0.1", 1), {}, object(), "", True, []
+    )
+
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_sdk_close_releases_reader_before_socket_shutdown():
+    events = []
+
+    class Reader:
+        def close(self):
+            events.append("reader.close")
+
+    class Socket:
+        def shutdown(self, how):
+            events.append(("socket.shutdown", how))
+
+        def close(self):
+            events.append("socket.close")
+
+    client = qmt_sdk._Client()
+    client._rf = Reader()
+    client._sock = Socket()
+
+    client.close()
+
+    assert events == [
+        "reader.close",
+        ("socket.shutdown", socket.SHUT_RDWR),
+        "socket.close",
+    ]
+    assert client._rf is None and client._sock is None
 
 
 def test_qmt_rpc_defaults_are_unconfigured_and_trade_enabled():

@@ -274,6 +274,17 @@ def _checksum(targets):
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
+def _parse_iso_datetime(value):
+    """解析 targets 时间；兼容大 QMT 内置 Python 3.6。"""
+    text = str(value or "").strip()
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text[:19], fmt)
+        except ValueError:
+            pass
+    raise ValueError("ISO 时间格式错误: %s" % text)
+
+
 def _load_today_targets(now):
     """当日全部策略的 targets(逐份校验,不合格的跳过并说明)。"""
     tdir = os.path.join(SHARE_DIR, "targets")
@@ -293,7 +304,7 @@ def _load_today_targets(now):
                 raise ValueError("date 不符: %s" % p.get("date"))
             if _checksum(p.get("targets", {})) != p.get("checksum"):
                 raise ValueError("checksum 不符")
-            gen = datetime.fromisoformat(p["generated_at"])
+            gen = _parse_iso_datetime(p["generated_at"])
             if (now - gen).total_seconds() > MAX_AGE_HOURS * 3600:
                 raise ValueError("超出时效: %s" % p["generated_at"])
             if STRATEGIES and p.get("strategy") not in STRATEGIES:
@@ -552,7 +563,16 @@ def to_jsonable(obj, _depth=0):
         return {str(k): to_jsonable(v, _depth + 1) for k, v in obj.items()}
     attrs = [a for a in dir(obj) if a.startswith("m_")]
     if attrs:
-        return {a: to_jsonable(getattr(obj, a, None), _depth + 1) for a in attrs}
+        out = {}
+        for attr in attrs:
+            try:
+                value = getattr(obj, attr)
+                out[attr] = to_jsonable(value, _depth + 1)
+            except Exception:
+                # QMT 实盘对象含 m_xtTag 等不可转出的 C++ shared_ptr；
+                # 单字段不可读不能连带毁掉整份委托/成交列表。
+                continue
+        return out
     try:
         return {k: to_jsonable(v, _depth + 1) for k, v in vars(obj).items()}
     except TypeError:
@@ -610,7 +630,10 @@ def _handle(conn, addr, namespace, C, token, allow_trade, allow_ips):
     buf = b""
     with conn:
         while True:
-            chunk = conn.recv(65536)
+            try:
+                chunk = conn.recv(65536)
+            except OSError:
+                return
             if not chunk:
                 return
             buf += chunk
@@ -631,8 +654,11 @@ def _handle(conn, addr, namespace, C, token, allow_trade, allow_ips):
                     resp = {"id": rid, "ok": False,
                             "error": "%s: %s" % (type(e).__name__, e)}
                     traceback.print_exc()
-                conn.sendall((json.dumps(resp, ensure_ascii=False,
-                                         default=str) + "\n").encode("utf-8"))
+                try:
+                    conn.sendall((json.dumps(resp, ensure_ascii=False,
+                                             default=str) + "\n").encode("utf-8"))
+                except OSError:
+                    return
 
 
 def _make_server_socket():

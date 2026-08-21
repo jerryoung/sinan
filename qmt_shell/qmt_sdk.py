@@ -70,12 +70,22 @@ class _Client:
         return self
 
     def close(self):
-        if self._sock is not None:
+        reader, sock = self._rf, self._sock
+        self._rf, self._sock = None, None
+        if reader is not None:
             try:
-                self._sock.close()
+                reader.close()
             except OSError:
                 pass
-        self._sock, self._rf = None, None
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                sock.close()
+            except OSError:
+                pass
 
     def call(self, fn: str, *args, **kwargs):
         if self._sock is None:
