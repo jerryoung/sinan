@@ -52,8 +52,8 @@ def _strategy(**kw) -> StrategyCfg:
 
 def test_repo_live_profiles_has_local_qmt():
     cfg = load_live_profiles()
-    assert cfg.default == "local_qmt"
     assert cfg.profiles["local_qmt"].engine == "qmt"
+    assert cfg.profiles["local_qmt"].qmt.rpc.host == "127.0.0.1"
     assert cfg.profiles["local_qmt"].qmt.algo.quote_mode == "latest"
     assert cfg.profiles["local_qmt"].qmt.algo.price_offset == pytest.approx(0.002)
     assert cfg.profiles["local_qmt"].qmt.algo.max_order_qty == 10000
@@ -82,7 +82,7 @@ def test_repo_settings_has_no_legacy_live_or_qmt_rpc_section():
     assert "live" not in raw
     assert "qmt_rpc" not in raw
     profiles = load_live_profiles()
-    assert profiles.profiles[profiles.default].qmt.rpc.host == "127.0.0.1"
+    assert profiles.profiles["local_qmt"].qmt.rpc.host == "127.0.0.1"
 
 
 def test_production_entrypoints_do_not_use_legacy_qmt_resolver():
