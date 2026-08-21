@@ -158,8 +158,10 @@ received
 
 ### 5.1 防重复报单
 
-每笔委托使用确定性备注 `策略ID#YYYYMMDD#序号`。调用 `passorder` 前先把该笔状态
-持久化为 `submitting`：
+每笔委托使用少于 24 字符的确定性短备注（策略 ID + 日期哈希、序号），完整
+strategy/date/sequence 保存在 execution journal 并建立反向索引；旧版
+`策略ID#YYYYMMDD#序号` 继续兼容读取。调用 `passorder` 前先把该笔状态持久化为
+`submitting`：
 
 - 重启看到 `accepted` 或更后状态，不再提交；
 - 重启看到 `submitting/submitted`，先按 remark 查询委托和成交；

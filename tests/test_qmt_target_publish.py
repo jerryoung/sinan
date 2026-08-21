@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -63,7 +64,7 @@ def test_publish_targets_replaces_unstarted_payload_atomically(tmp_path, monkeyp
 
 @pytest.mark.parametrize("strategy", [
     "", "../alpha", "a/b", "a\\b", "a:b", "a*b", "a?b", 'a"b',
-    "a<b", "a>b", "a|b", "a\nb", "a\x00b",
+    "a<b", "a>b", "a|b", "a\nb", "a\x00b", "alpha ", "a" * 129,
 ])
 def test_publish_targets_rejects_unsafe_strategy(strategy, tmp_path, monkeypatch):
     monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
@@ -85,6 +86,30 @@ def test_publish_targets_rejects_checksum_mismatch(tmp_path, monkeypatch):
     monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
     with pytest.raises(ValueError, match="checksum"):
         rpc_server._publish_targets(_payload(checksum="0" * 64))
+
+
+@pytest.mark.parametrize("targets", [
+    {"510300": -0.01}, {"510300": 1.01},
+    {"510300": 0.6, "159915": 0.5},
+])
+def test_publish_targets_rejects_weights_outside_long_only_budget(
+        targets, tmp_path, monkeypatch):
+    monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
+    with pytest.raises(ValueError, match="权重|总权重"):
+        rpc_server._publish_targets(_payload(targets=targets))
+
+
+def test_qmt_loader_rejects_payload_identity_that_does_not_match_filename(
+        tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
+    directory = tmp_path / "targets"
+    directory.mkdir()
+    (directory / "targets_alpha_20260821.json").write_text(
+        json.dumps(_payload(strategy="../escape")), encoding="utf-8"
+    )
+
+    assert rpc_server._load_today_targets(datetime(2026, 8, 21, 14, 45)) == []
+    assert "跳过" in capsys.readouterr().out
 
 
 def test_publish_targets_rejects_oversized_payload(tmp_path, monkeypatch):

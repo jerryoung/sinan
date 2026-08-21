@@ -16,7 +16,8 @@ r"""
 白名单或共享目录,修改配置后重启策略生效。
 
 ── 多策略共账号:备注归因 + 策略虚拟账本 ─────────────────────────────
-每笔委托的投资备注为「策略ID#日期#序号」(可再扩展 # 字段)。脚本为每个
+每笔新委托使用 <24 字符的确定性短备注，完整策略 ID/日期/序号保存在 execution
+journal 并建立反向索引(旧版「策略ID#日期#序号」继续可读)。脚本为每个
 策略维护一本虚拟账本(现金+持仓,SHARE_DIR/state/ledger_{策略}.json,
 首次以 targets 的 capital 开账):下单差额 = 策略自己的目标 − 自己的账本,
 互不读写对方持仓;15:05 查询当日成交(deal),按备注归回各策略、以实际
@@ -308,7 +309,8 @@ def _parse_iso_datetime(value):
 def _safe_strategy(value):
     """把策略 ID 限制为单个安全文件名片段，同时保留合法中文名称。"""
     strategy = str(value or "")
-    if (not strategy or strategy in (".", "..") or
+    if (not strategy or strategy != strategy.strip() or len(strategy) > 128 or
+            strategy in (".", "..") or
             any(ord(ch) < 32 for ch in strategy) or
             any(ch in '\\/:*?"<>|' for ch in strategy)):
         raise ValueError("策略名称不安全: %r" % strategy)
@@ -345,6 +347,10 @@ def _validate_target_payload(payload):
         if (isinstance(weight, bool) or not isinstance(weight, (int, float)) or
                 not math.isfinite(float(weight))):
             raise ValueError("targets 权重必须是有限数字: %s" % symbol)
+        if float(weight) < 0.0 or float(weight) > 1.0:
+            raise ValueError("targets 权重必须在 0..1: %s" % symbol)
+    if sum(float(weight) for weight in targets.values()) > 1.0 + 1e-8:
+        raise ValueError("targets 总权重不能超过 1")
     if _checksum(targets) != clean.get("checksum"):
         raise ValueError("targets checksum 不符")
     return clean
@@ -385,6 +391,9 @@ def _publish_targets(payload, now=None):
                     old = json.load(f)
             except (OSError, ValueError) as e:
                 raise ValueError("已有 targets 无法读取: %s" % e)
+            old = _validate_target_payload(old)
+            if old["strategy"] != strategy or old["date"] != day:
+                raise ValueError("已有 targets 身份字段不符")
             if old.get("checksum") == checksum:
                 status = "duplicate"
             else:
@@ -419,10 +428,12 @@ def _load_today_targets(now):
         try:
             with open(path, encoding="utf-8") as f:
                 p = json.load(f)
+            p = _validate_target_payload(p)
             if p.get("date") != now.strftime("%Y-%m-%d"):
                 raise ValueError("date 不符: %s" % p.get("date"))
-            if _checksum(p.get("targets", {})) != p.get("checksum"):
-                raise ValueError("checksum 不符")
+            expected = "targets_%s_%s.json" % (p["strategy"], ymd)
+            if name != expected:
+                raise ValueError("文件名与 targets 身份不符")
             gen = _parse_iso_datetime(p["generated_at"])
             if (now - gen).total_seconds() > MAX_AGE_HOURS * 3600:
                 raise ValueError("超出时效: %s" % p["generated_at"])
@@ -436,14 +447,61 @@ def _load_today_targets(now):
 
 
 def make_remark(strategy, ymd, seq):
-    """下单备注「策略ID#日期#序号」;# 后可继续扩展字段。"""
-    return "%s#%s#%d" % (strategy, ymd, seq)
+    """生成 QMT 要求的 <24 字符确定性备注；完整策略身份留在执行日志。"""
+    digest = hashlib.sha256(
+        (str(strategy) + "#" + str(ymd)).encode("utf-8")).hexdigest()[:10]
+    number = int(seq)
+    if number < 0:
+        raise ValueError("委托序号不能为负数")
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+    encoded = "0"
+    if number:
+        chars = []
+        while number:
+            number, remainder = divmod(number, 36)
+            chars.append(alphabet[remainder])
+        encoded = "".join(reversed(chars))
+    remark = "sn#%s#%s" % (digest, encoded)
+    if len(remark) >= 24:
+        raise ValueError("QMT 投资备注超过 23 字符")
+    return remark
 
 
 def parse_remark(remark):
-    """备注 → (策略ID, 扩展字段列表);非司南格式返回 (None, [])。"""
+    """解析旧版「策略ID#日期#序号」；新版短备注由 execution journal 反查。"""
     parts = str(remark or "").split("#")
+    if parts and parts[0] == "sn":
+        return None, []
     return (parts[0], parts[1:]) if len(parts) >= 2 and parts[0] else (None, [])
+
+
+def _execution_remark_index(ymd):
+    """建立当日短备注→策略索引；发现碰撞时拒绝归因而非猜测。"""
+    try:
+        day = datetime.strptime(str(ymd), "%Y%m%d").strftime("%Y-%m-%d")
+    except ValueError:
+        raise ValueError("备注索引日期无效:%s" % ymd)
+    index = {}
+    for execution in _load_day_executions(day):
+        strategy = execution.get("strategy")
+        for order in execution.get("orders") or []:
+            remark = str(order.get("remark") or "")
+            if not remark:
+                continue
+            previous = index.get(remark)
+            if previous is not None and previous != strategy:
+                raise ValueError("执行日志备注碰撞:%s" % remark)
+            index[remark] = strategy
+    return index
+
+
+def _strategy_from_remark(remark, ymd, index):
+    if remark in index:
+        return index[remark]
+    strategy, ext = parse_remark(remark)
+    if strategy is not None and ext and ext[0] == ymd:
+        return strategy
+    return None
 
 
 def _ledger_path(strategy):
@@ -704,12 +762,13 @@ def _normalize_symbol(value):
 def _collect_orders(ymd):
     """查询当日司南委托并按策略归因；匹配记录缺必需字段时拒绝伪成功。"""
     by_strategy = {}
+    remark_index = _execution_remark_index(ymd)
     rows = get_trade_detail_data(
         _ACCOUNT["id"], _ACCOUNT["type"], "order") or []
     for obj in rows:
         remark = _remark_identity(obj)
-        strategy, ext = parse_remark(remark)
-        if strategy is None or not ext or ext[0] != ymd:
+        strategy = _strategy_from_remark(remark, ymd, remark_index)
+        if strategy is None:
             continue
         try:
             symbol = _normalize_symbol(_read_qmt_attr(
@@ -744,12 +803,13 @@ def _collect_orders(ymd):
 def _collect_deals(ymd):
     """查询当日司南真实成交并按策略归因。"""
     by_strategy = {}
+    remark_index = _execution_remark_index(ymd)
     rows = get_trade_detail_data(
         _ACCOUNT["id"], _ACCOUNT["type"], "deal") or []
     for obj in rows:
         remark = _remark_identity(obj)
-        strategy, ext = parse_remark(remark)
-        if strategy is None or not ext or ext[0] != ymd:
+        strategy = _strategy_from_remark(remark, ymd, remark_index)
+        if strategy is None:
             continue
         try:
             raw_time = _read_qmt_attr(
@@ -888,7 +948,7 @@ def _reconcile_execution(execution, qmt_orders, qmt_deals):
         if traded_qty >= int(planned.get("qty", 0)) and traded_qty > 0:
             planned["status"] = "filled"
         elif traded_qty > 0:
-                planned["status"] = "partially_filled"
+            planned["status"] = "partially_filled"
         if remark in broken_deals:
             planned["status"] = "unreadable"
             planned["error"] = broken_deals[remark]
@@ -925,12 +985,20 @@ def _load_day_executions(day):
     for name in sorted(os.listdir(directory)):
         if not name.startswith("execution_") or not name.endswith(suffix):
             continue
-        with open(os.path.join(directory, name), encoding="utf-8") as f:
-            value = json.load(f)
-        _safe_strategy(value.get("strategy"))
-        if value.get("date") != day:
-            raise ValueError("执行日志日期不符:%s" % name)
-        out.append(value)
+        try:
+            with open(os.path.join(directory, name), encoding="utf-8") as f:
+                value = json.load(f)
+            _safe_strategy(value.get("strategy"))
+            if value.get("date") != day:
+                raise ValueError("执行日志日期不符")
+            expected = "execution_%s_%s.json" % (
+                value["strategy"], day.replace("-", ""))
+            if name != expected:
+                raise ValueError("执行日志文件名与身份不符")
+            out.append(value)
+        except Exception as e:                 # 一份坏日志不阻断其他策略
+            print("[sinan] 跳过执行日志 %s:%s: %s"
+                  % (name, type(e).__name__, e))
     return out
 
 
@@ -1161,6 +1229,8 @@ def _execution_status_payload(strategy, day):
     if os.path.exists(fills_path):
         with open(fills_path, encoding="utf-8") as f:
             fills = json.load(f)
+        if fills.get("strategy") != strategy or fills.get("date") != day:
+            raise ValueError("fills 身份字段不符")
     return {"found": journal is not None or fills is not None,
             "journal": journal, "fills": fills}
 

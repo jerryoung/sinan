@@ -607,10 +607,14 @@ def test_connect_from_settings_uses_default_live_profile_rpc(monkeypatch, tmp_pa
 
 # ---------------- 多策略共账号:备注归因 + 虚拟账本 ----------------
 def test_remark_roundtrip():
-    r = rpc_server.make_remark("combo_x2", "20260810", 3)
-    assert r == "combo_x2#20260810#3"
-    strategy, ext = rpc_server.parse_remark(r)
+    r = rpc_server.make_remark("combo_turtle_xsmom_x2", "20260810", 3)
+    assert r.startswith("sn#") and len(r) < 24
+    assert r == rpc_server.make_remark("combo_turtle_xsmom_x2", "20260810", 3)
+    assert r != rpc_server.make_remark("combo_turtle_xsmom_x2", "20260810", 4)
+    # 旧版长备注继续可读；新版短备注由 execution journal 精确反查。
+    strategy, ext = rpc_server.parse_remark("combo_x2#20260810#3")
     assert strategy == "combo_x2" and ext == ["20260810", "3"]
+    assert rpc_server.parse_remark(r) == (None, [])
     assert rpc_server.parse_remark("手工下单") == (None, [])
     assert rpc_server.parse_remark("") == (None, [])
 

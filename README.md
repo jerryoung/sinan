@@ -61,7 +61,7 @@ scripts/           bootstrap / daily_update / shadow_update / run_signal / run_b
                    / publish_targets / qmt_trade_probe / 研究脚本
 qmt_shell/         sinan_qmt(ECS 统一脚本,机器配置统一读
                    C:\sinan\config\qmt.json:执行全部策略 targets + 备注
-                   「策略ID#日期#序号」归因 + 持久化执行日志 + 真实 deals 回写
+                   短确定性备注归因 + 持久化执行日志 + 真实 deals 回写
                    + RPC v2 转发;账号从 QMT 绑定关系直读)· qmt_sdk(本地 SDK)
 app.py + ui/       Streamlit 操作面板(app.py 路由入口,ui/ 页面模块)
 docs/RESEARCH.md   研究档案:全部实验结论表与决策记录

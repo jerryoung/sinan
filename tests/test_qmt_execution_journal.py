@@ -66,9 +66,10 @@ def test_prepare_execution_persists_baseline_and_deterministic_chunks(
     }
     assert [o["sequence"] for o in execution["orders"]] == [1, 2, 3, 4]
     assert [o["remark"] for o in execution["orders"]] == [
-        "alpha#20260821#1", "alpha#20260821#2",
-        "alpha#20260821#3", "alpha#20260821#4",
+        rpc_server.make_remark("alpha", "20260821", seq)
+        for seq in (1, 2, 3, 4)
     ]
+    assert all(len(o["remark"]) < 24 for o in execution["orders"])
     assert execution["orders"][0]["side"] == "sell"
     path = tmp_path / "executions" / "execution_alpha_20260821.json"
     assert json.loads(path.read_text(encoding="utf-8")) == execution

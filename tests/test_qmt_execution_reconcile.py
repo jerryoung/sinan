@@ -132,6 +132,27 @@ def test_collect_orders_and_deals_normalize_required_safe_fields(monkeypatch):
     assert deals["alpha"][0] == _deal()
 
 
+def test_compact_remark_is_attributed_through_execution_journal(tmp_path, monkeypatch):
+    monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
+    compact = rpc_server.make_remark(
+        "combo_turtle_xsmom_x2", "20260821", 1
+    )
+    execution = _execution()
+    execution["strategy"] = "combo_turtle_xsmom_x2"
+    execution["orders"][0]["remark"] = compact
+    rpc_server.save_execution(execution)
+    order = _OrderObject()
+    order.m_strRemark = compact
+    monkeypatch.setattr(
+        rpc_server, "get_trade_detail_data", lambda *_args: [order]
+    )
+
+    rows = rpc_server._collect_orders("20260821")
+
+    assert list(rows) == ["combo_turtle_xsmom_x2"]
+    assert rows["combo_turtle_xsmom_x2"][0]["remark"] == compact
+
+
 def test_unreadable_required_field_is_error_not_empty_success(monkeypatch):
     class Broken(_OrderObject):
         @property
@@ -220,3 +241,19 @@ def test_snapshot_isolates_one_strategy_refresh_failure(monkeypatch, capsys):
 
     assert seen == ["beta"]
     assert "alpha" in capsys.readouterr().out
+
+
+def test_load_day_executions_skips_one_corrupt_journal(tmp_path, monkeypatch,
+                                                       capsys):
+    monkeypatch.setattr(rpc_server, "SHARE_DIR", str(tmp_path))
+    valid = _execution()
+    rpc_server.save_execution(valid)
+    directory = tmp_path / "executions"
+    (directory / "execution_bad_20260821.json").write_text(
+        "{broken", encoding="utf-8"
+    )
+
+    loaded = rpc_server._load_day_executions("2026-08-21")
+
+    assert [item["strategy"] for item in loaded] == ["alpha"]
+    assert "execution_bad" in capsys.readouterr().out
