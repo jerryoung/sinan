@@ -78,10 +78,10 @@ var/store(parquet+DuckDB)→ SignalContext → generate_targets ┬→ backtest/
 - **QMT 服务器机器配置**:固定从 `C:\sinan\config\qmt.json` 读取共享目录、
   实盘推送、RPC、Token 与 IP 白名单；文件缺失时薄壳自动生成
   `rpc.enable=false` 的安全默认配置。私有值不得写回 `sinan_qmt.py`、仓库、日志或
-  runtime 同步目录；`rpc.recovery_query_timeout` 控制重启后按备注等待柜台缓存的
-  最长秒数(默认 5)；修改 JSON 后停止并重新启动 QMT 策略生效。RPC 协议 v2
+  runtime 同步目录；修改 JSON 后停止并重新启动 QMT 策略生效。RPC 协议 v2
   把 QMT C++ API 调用放入策略线程请求泵，socket 后台线程只处理健康、targets
-  原子发布和状态文件读取。绑定仿真账号仍须把模型切为“实盘运行”才能触发报单；
+  原子发布和状态文件读取；重启恢复只查询一次本地柜台缓存，不得阻塞共享策略线程。
+  绑定仿真账号仍须把模型切为“实盘运行”才能触发报单；
   QMT 界面模式不可稳定检测，普通 readiness 严禁下单，显式交易探针才可验证。
 - **风险层级**:策略参数 cap/x_risk → 引擎 Σ≤1 + `max_positions`(与 live 共用
   `sinan/risk.py` 的 `limit_positions`:已持仓优先)→ live `apply_risk` 多重裁剪

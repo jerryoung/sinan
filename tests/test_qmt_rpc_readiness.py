@@ -12,6 +12,8 @@ class _FakeClient:
     calls = []
     fail_on = None
     account_status = "正常"
+    account_balance = 100_000.0
+    account_available = 60_000.0
 
     def connect(self, host, port, token, timeout):
         self.calls.append(("connect", host, port, token, timeout))
@@ -39,7 +41,9 @@ class _FakeClient:
             kind = args[2]
             if kind == "account":
                 return [SimpleNamespace(m_strAccountID="80391000",
-                                        m_strStatus=self.account_status)]
+                                        m_strStatus=self.account_status,
+                                        m_dBalance=self.account_balance,
+                                        m_dAvailable=self.account_available)]
             if kind in {"order", "deal"}:
                 return []
         raise AssertionError(fn)
@@ -54,6 +58,8 @@ def _run(monkeypatch, tmp_path: Path, fail_on=None):
     _FakeClient.calls = []
     _FakeClient.fail_on = fail_on
     _FakeClient.account_status = "正常"
+    _FakeClient.account_balance = 100_000.0
+    _FakeClient.account_available = 60_000.0
     monkeypatch.setattr(qmt_sdk, "_Client", _FakeClient)
     return verify_qmt_rpc(QmtRpcCfg(host="qmt.example", port=58620, timeout=3),
                           token_path=token)
@@ -87,9 +93,35 @@ def test_verify_qmt_rpc_marks_quote_failure(monkeypatch, tmp_path):
     assert not result.ready and result.stage == "quote"
 
 
-def test_verify_qmt_rpc_marks_account_login_failure(monkeypatch, tmp_path):
+def test_verify_qmt_rpc_treats_broker_status_text_as_advisory(
+        monkeypatch, tmp_path):
     _FakeClient.fail_on = None
-    _FakeClient.account_status = "准备登录"
+    _FakeClient.account_status = "登录失败"
+    token = tmp_path / "token"
+    token.write_text("secret", encoding="utf-8")
+    _FakeClient.calls = []
+    monkeypatch.setattr(qmt_sdk, "_Client", _FakeClient)
+
+    result = verify_qmt_rpc(
+        QmtRpcCfg(host="qmt.example", port=58620, timeout=3), token_path=token
+    )
+
+    assert result.ready and result.stage == "ready"
+    assert result.account == {"id": "80391000", "status": "登录失败"}
+    assert "状态文本仅供参考" in result.message
+
+
+@pytest.mark.parametrize("balance,available", [
+    (float("nan"), 60_000.0),
+    (100_000.0, float("inf")),
+    (-1.0, 60_000.0),
+])
+def test_verify_qmt_rpc_rejects_account_without_valid_funds(
+        monkeypatch, tmp_path, balance, available):
+    _FakeClient.fail_on = None
+    _FakeClient.account_status = "正常"
+    _FakeClient.account_balance = balance
+    _FakeClient.account_available = available
     token = tmp_path / "token"
     token.write_text("secret", encoding="utf-8")
     _FakeClient.calls = []
@@ -100,6 +132,7 @@ def test_verify_qmt_rpc_marks_account_login_failure(monkeypatch, tmp_path):
     )
 
     assert not result.ready and result.stage == "account"
+    assert "资金字段" in result.message
 
 
 @pytest.mark.parametrize("kind", ["order", "deal"])

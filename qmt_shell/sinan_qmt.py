@@ -68,7 +68,6 @@ RPC_PORT = 58620
 RPC_TOKEN = ""               # 仅为安全缺省；实际值只放 qmt.json
 RPC_ALLOW_TRADE = True       # 是否允许 passorder/cancel
 RPC_ALLOW_IPS = []           # 单 IP 或 CIDR(100.64.0.0/10)
-RPC_RECOVERY_QUERY_TIMEOUT = 5.0  # 重启后按备注等待柜台缓存的最长秒数
 
 LIVE_PUSH_ENABLE = True
 LIVE_PUSH_PERIOD = "5nSecond"
@@ -114,7 +113,6 @@ def _default_local_config():
             "token": "",
             "allow_trade": True,
             "allow_ips": [],
-            "recovery_query_timeout": 5.0,
         },
         "live_push": {"enable": True, "period": "5nSecond"},
     }
@@ -175,13 +173,6 @@ def _validate_local_config(cfg):
             raise QmtConfigError("rpc.allow_ips 包含无效 IP/CIDR")
         clean_ips.append(entry)
     rpc["allow_ips"] = clean_ips
-    timeout = rpc["recovery_query_timeout"]
-    if (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or
-            not math.isfinite(float(timeout)) or not 0 < float(timeout) <= 60):
-        raise QmtConfigError(
-            "rpc.recovery_query_timeout 必须在 0..60 秒之间")
-    rpc["recovery_query_timeout"] = float(timeout)
-
     live = cfg["live_push"]
     _require_bool(live["enable"], "live_push.enable")
     if not isinstance(live["period"], str) or not live["period"].strip():
@@ -227,7 +218,7 @@ def load_local_config(path=QMT_CONFIG_PATH):
 def _apply_local_config(cfg):
     """把启动快照接入现有薄壳变量；调用方无需了解配置文件结构。"""
     global SHARE_DIR, RPC_ENABLE, RPC_HOST, RPC_PORT, RPC_TOKEN
-    global RPC_ALLOW_TRADE, RPC_ALLOW_IPS, RPC_RECOVERY_QUERY_TIMEOUT
+    global RPC_ALLOW_TRADE, RPC_ALLOW_IPS
     global LIVE_PUSH_ENABLE, LIVE_PUSH_PERIOD
     SHARE_DIR = cfg["share_dir"]
     rpc = cfg["rpc"]
@@ -237,7 +228,6 @@ def _apply_local_config(cfg):
     RPC_TOKEN = rpc["token"]
     RPC_ALLOW_TRADE = rpc["allow_trade"]
     RPC_ALLOW_IPS = list(rpc["allow_ips"])
-    RPC_RECOVERY_QUERY_TIMEOUT = rpc["recovery_query_timeout"]
     live = cfg["live_push"]
     LIVE_PUSH_ENABLE = live["enable"]
     LIVE_PUSH_PERIOD = live["period"]
@@ -720,33 +710,18 @@ def submit_execution(C, execution):
     return execution
 
 
-def _recover_submission_state(execution, timeout=None, interval=0.25,
-                              clock=None, sleep=None):
-    """重启后先向柜台按备注求证；无法证明的副作用一律转 uncertain。"""
-    clock = clock or time.monotonic
-    sleep = sleep or time.sleep
-    timeout = (RPC_RECOVERY_QUERY_TIMEOUT if timeout is None
-               else float(timeout))
-    deadline = clock() + max(0.0, timeout)
+def _recover_submission_state(execution):
+    """重启后单次查询本地柜台缓存；不得阻塞 QMT 的共享策略线程。"""
     strategy = execution["strategy"]
     ymd = execution["date"].replace("-", "")
     pending = {o.get("remark") for o in execution.get("orders") or []
                if o.get("status") in ("submitting", "submitted")}
     orders, deals, query_error = [], [], None
-    while True:
-        try:
-            orders = _collect_orders(ymd).get(strategy, [])
-            deals = _collect_deals(ymd).get(strategy, [])
-            observed = {row.get("remark") for row in orders + deals}
-            if pending.issubset(observed):
-                break
-        except Exception as e:                 # 查询失败也不能猜测未报
-            query_error = "%s: %s" % (type(e).__name__, e)
-            break
-        remaining = deadline - clock()
-        if remaining <= 0:
-            break
-        sleep(min(float(interval), remaining))
+    try:
+        orders = _collect_orders(ymd).get(strategy, [])
+        deals = _collect_deals(ymd).get(strategy, [])
+    except Exception as e:                     # 查询失败也不能猜测未报
+        query_error = "%s: %s" % (type(e).__name__, e)
 
     original_pending = set(pending)
     result = _reconcile_execution(execution, orders, deals)

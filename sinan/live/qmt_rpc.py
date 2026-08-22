@@ -1,6 +1,7 @@
 """QMT RPC 就绪验证：无交易副作用，逐层返回可诊断结果。"""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,11 +31,21 @@ def _field(obj, name: str, default=None):
     return getattr(obj, name, default)
 
 
-def _account_ready_status(status: str) -> bool:
-    """空状态兼容旧 QMT；明确的未就绪状态必须拒绝。"""
+def _valid_account_amount(value) -> bool:
+    """资金字段比券商自定义状态文案更接近可查询账号的结构事实。"""
+    if isinstance(value, bool):
+        return False
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(amount) and amount >= 0
+
+
+def _status_is_advisory(status: str) -> bool:
     text = str(status or "").strip()
-    bad = ("准备登录", "未登录", "登录失败", "未连接", "断开", "离线")
-    return not text or not any(word in text for word in bad)
+    words = ("准备登录", "未登录", "登录失败", "未连接", "断开", "离线")
+    return bool(text and any(word in text for word in words))
 
 
 def verify_qmt_rpc(rpc: QmtRpcCfg, token_path: Path | None = None) -> QmtRpcReadiness:
@@ -93,8 +104,9 @@ def verify_qmt_rpc(rpc: QmtRpcCfg, token_path: Path | None = None) -> QmtRpcRead
             if matched is None:
                 raise qmt_sdk.QmtRpcError("返回账号与模型绑定账号不一致")
             status = str(_field(matched, "m_strStatus", "") or "")
-            if not _account_ready_status(status):
-                raise qmt_sdk.QmtRpcError(f"账号状态未就绪：{status}")
+            if not all(_valid_account_amount(_field(matched, name)) for name in (
+                    "m_dBalance", "m_dAvailable")):
+                raise qmt_sdk.QmtRpcError("账号资金字段缺失或无效")
         except (OSError, TimeoutError, ConnectionError, qmt_sdk.QmtRpcError) as ex:
             return QmtRpcReadiness(
                 False, "account", f"账号验证失败：{ex}", endpoint,
@@ -117,6 +129,8 @@ def verify_qmt_rpc(rpc: QmtRpcCfg, token_path: Path | None = None) -> QmtRpcRead
         trade_query = {"orders": len(orders), "deals": len(deals)}
         message = ("RPC 已准备就绪" if health.get("trade_mode") != "unknown"
                    else "RPC 已准备就绪；QMT 模式不可自动检测")
+        if _status_is_advisory(status):
+            message += "；券商账号状态文本仅供参考"
         return QmtRpcReadiness(
             True, "ready", message, endpoint, health=health, quote=quote,
             account=account, trade_query=trade_query,

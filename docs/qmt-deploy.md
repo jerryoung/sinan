@@ -48,7 +48,6 @@ New-Item -ItemType Directory -Force -Path $configDir | Out-Null
     token = $rpcToken
     allow_trade = $true
     allow_ips = @('替换为本机出口IP')
-    recovery_query_timeout = 5.0
   }
   live_push = @{enable = $true; period = '5nSecond'}
 } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 $configPath

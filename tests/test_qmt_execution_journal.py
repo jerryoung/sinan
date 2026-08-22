@@ -155,7 +155,6 @@ def test_existing_submitting_state_is_recovered_as_uncertain_without_call(
     monkeypatch.setattr(rpc_server, "passorder", lambda *args: called.append(args))
     monkeypatch.setattr(rpc_server, "_collect_orders", lambda _ymd: {})
     monkeypatch.setattr(rpc_server, "_collect_deals", lambda _ymd: {})
-    monkeypatch.setattr(rpc_server, "RPC_RECOVERY_QUERY_TIMEOUT", 0.01)
 
     result = rpc_server.submit_execution(object(), execution)
 
@@ -207,7 +206,6 @@ def test_restart_missing_submitted_order_becomes_uncertain_and_stops_plan(
     monkeypatch.setattr(rpc_server, "save_execution", lambda _value: None)
     monkeypatch.setattr(rpc_server, "_collect_orders", lambda _ymd: {})
     monkeypatch.setattr(rpc_server, "_collect_deals", lambda _ymd: {})
-    monkeypatch.setattr(rpc_server, "RPC_RECOVERY_QUERY_TIMEOUT", 0.01)
     monkeypatch.setattr(
         rpc_server, "passorder", lambda *args: submitted.append(args)
     )
@@ -220,33 +218,31 @@ def test_restart_missing_submitted_order_becomes_uncertain_and_stops_plan(
     assert result["orders"][1]["status"] == "planned"
 
 
-def test_restart_recovery_uses_deadline_window_not_fixed_attempt_count(
-        monkeypatch):
+def test_restart_recovery_queries_once_without_blocking_qmt_thread(monkeypatch):
     execution = _planned_execution()
     execution["orders"][0]["status"] = "submitted"
     execution["status"] = "submitted"
-    values = {"now": 0.0, "queries": 0}
-
-    def clock():
-        return values["now"]
-
-    def sleep(seconds):
-        values["now"] += seconds
+    values = {"orders": 0, "deals": 0}
 
     def orders(_ymd):
-        values["queries"] += 1
+        values["orders"] += 1
         return {}
 
+    def deals(_ymd):
+        values["deals"] += 1
+        return {}
+
+    def forbidden_sleep(_seconds):
+        raise AssertionError("QMT 策略线程禁止 sleep")
+
     monkeypatch.setattr(rpc_server, "_collect_orders", orders)
-    monkeypatch.setattr(rpc_server, "_collect_deals", lambda _ymd: {})
+    monkeypatch.setattr(rpc_server, "_collect_deals", deals)
     monkeypatch.setattr(rpc_server, "save_execution", lambda _value: None)
+    monkeypatch.setattr(rpc_server.time, "sleep", forbidden_sleep)
 
-    result = rpc_server._recover_submission_state(
-        execution, timeout=1.0, interval=0.2, clock=clock, sleep=sleep
-    )
+    result = rpc_server._recover_submission_state(execution)
 
-    assert values["now"] == pytest.approx(1.0)
-    assert values["queries"] >= 5
+    assert values == {"orders": 1, "deals": 1}
     assert result["status"] == "uncertain"
 
 

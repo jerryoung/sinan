@@ -210,7 +210,6 @@ def test_load_local_config_creates_safe_default_when_file_missing(tmp_path):
         "token": "",
         "allow_trade": True,
         "allow_ips": [],
-        "recovery_query_timeout": 5.0,
     }
     assert cfg["live_push"] == {"enable": True, "period": "5nSecond"}
     assert json.loads(path.read_text(encoding="utf-8")) == cfg
@@ -241,7 +240,6 @@ def test_load_local_config_reads_all_machine_values_from_one_file(tmp_path):
     assert cfg["rpc"]["allow_ips"] == [
         "120.245.101.210", "100.64.0.0/10"
     ]
-    assert cfg["rpc"]["recovery_query_timeout"] == 5.0
     assert cfg["live_push"] == {"enable": False, "period": "10nSecond"}
 
 
@@ -260,7 +258,6 @@ def test_load_local_config_accepts_windows_powershell_utf8_bom(tmp_path):
 @pytest.mark.parametrize("payload,match", [
     ({"rpc": {"port": 70000}}, "rpc.port"),
     ({"rpc": {"allow_ips": ["错误IP"]}}, "rpc.allow_ips"),
-    ({"rpc": {"recovery_query_timeout": 0}}, "recovery_query_timeout"),
     ({"rpc": {"enable": True, "host": "0.0.0.0",
               "token": "short", "allow_ips": ["1.2.3.4"]}}, "至少32位"),
     ({"live_push": {"enable": "yes"}}, "live_push.enable"),
@@ -339,7 +336,6 @@ def _runtime_config(**rpc_overrides):
         "token": "x" * 32,
         "allow_trade": True,
         "allow_ips": ["127.0.0.1"],
-        "recovery_query_timeout": 5.0,
     }
     rpc.update(rpc_overrides)
     return {
@@ -353,7 +349,7 @@ def _restore_runtime_globals_after_test(monkeypatch):
     """init 会应用进程级启动快照；逐项登记以便 pytest 在用例后还原。"""
     for name in (
         "SHARE_DIR", "RPC_ENABLE", "RPC_HOST", "RPC_PORT", "RPC_TOKEN",
-        "RPC_ALLOW_TRADE", "RPC_ALLOW_IPS", "RPC_RECOVERY_QUERY_TIMEOUT",
+        "RPC_ALLOW_TRADE", "RPC_ALLOW_IPS",
         "LIVE_PUSH_ENABLE",
         "LIVE_PUSH_PERIOD", "_RPC_SERVER",
     ):
